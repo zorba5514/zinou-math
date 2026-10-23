@@ -5,12 +5,14 @@ import { join } from "node:path";
 
 const OUT = "public/fonts";
 const FONTS = [
-  { out: "plex-ar-400.woff2", pkg: "@fontsource/ibm-plex-sans-arabic", file: "ibm-plex-sans-arabic-arabic-400-normal.woff2" },
-  { out: "plex-lat-400.woff2", pkg: "@fontsource/ibm-plex-sans-arabic", file: "ibm-plex-sans-arabic-latin-400-normal.woff2" },
-  { out: "plex-ar-600.woff2", pkg: "@fontsource/ibm-plex-sans-arabic", file: "ibm-plex-sans-arabic-arabic-600-normal.woff2" },
-  { out: "plex-lat-600.woff2", pkg: "@fontsource/ibm-plex-sans-arabic", file: "ibm-plex-sans-arabic-latin-600-normal.woff2" },
-  { out: "kufi-ar.woff2", pkg: "@fontsource-variable/reem-kufi", file: "reem-kufi-arabic-wght-normal.woff2" },
-  { out: "kufi-lat.woff2", pkg: "@fontsource-variable/reem-kufi", file: "reem-kufi-latin-wght-normal.woff2" },
+  { out: "tajawal-ar-400.woff2", pkg: "@fontsource/tajawal", file: "tajawal-arabic-400-normal.woff2" },
+  { out: "tajawal-lat-400.woff2", pkg: "@fontsource/tajawal", file: "tajawal-latin-400-normal.woff2" },
+  { out: "tajawal-ar-500.woff2", pkg: "@fontsource/tajawal", file: "tajawal-arabic-500-normal.woff2" },
+  { out: "tajawal-lat-500.woff2", pkg: "@fontsource/tajawal", file: "tajawal-latin-500-normal.woff2" },
+  { out: "tajawal-ar-700.woff2", pkg: "@fontsource/tajawal", file: "tajawal-arabic-700-normal.woff2" },
+  { out: "tajawal-lat-700.woff2", pkg: "@fontsource/tajawal", file: "tajawal-latin-700-normal.woff2" },
+  { out: "tajawal-ar-800.woff2", pkg: "@fontsource/tajawal", file: "tajawal-arabic-800-normal.woff2" },
+  { out: "tajawal-lat-800.woff2", pkg: "@fontsource/tajawal", file: "tajawal-latin-800-normal.woff2" },
 ];
 
 mkdirSync(OUT, { recursive: true });

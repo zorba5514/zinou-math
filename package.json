@@ -16,8 +16,7 @@
     "fonts": "node scripts/copy-fonts.mjs"
   },
   "devDependencies": {
-    "@fontsource-variable/reem-kufi": "^5.0.0",
-    "@fontsource/ibm-plex-sans-arabic": "^5.0.0",
+    "@fontsource/tajawal": "^5.0.0",
     "@types/node": "^22.0.0",
     "typescript": "^6.0.0",
     "wrangler": "^4.0.0"

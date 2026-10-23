@@ -71,8 +71,9 @@ test("ملفات الهوية موجودة", () => {
     assert.ok(existsSync(root(file)), file);
   }
   const css = read("public/styles.css");
-  assert.match(css, /--marker: #fec101/);
-  assert.match(css, /--ink: #181818/);
+  assert.match(css, /--brand: #FBBF24/);
+  assert.match(css, /--ink: #16181D/);
+  assert.match(css, /font-family: "Tajawal"/);
 });
 
 test("القوالب تهرّب النصوص فلا تتحول إلى كود", () => {
@@ -109,4 +110,19 @@ test("ملفات الأسرار المحلية مستبعدة من المستو�
   for (const entry of [".dev.vars", ".env", "node_modules/"]) {
     assert.ok(ignore.includes(entry), entry);
   }
+});
+
+test("القائمة الجانبية تعمل دون كود: زر يفتحها وزر يغلقها", () => {
+  const page = homePage("staging");
+  assert.match(page, /<aside id="drawer" class="drawer" popover/);
+  assert.match(page, /popovertarget="drawer" aria-label="فتح القائمة"/);
+  assert.match(page, /popovertargetaction="hide"/);
+  assert.match(page, /class="nav-item" href="\/" aria-current="page"/);
+});
+
+test("الهوية: السداسي في الشعار فقط، والخط المتعرج مرة واحدة", () => {
+  const page = homePage("staging");
+  assert.doesNotMatch(page, /polygon\(/);
+  assert.doesNotMatch(read("public/styles.css"), /polygon\(/);
+  assert.equal(page.match(/class="zigzag"/g)?.length, 1);
 });

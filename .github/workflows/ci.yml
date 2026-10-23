@@ -87,8 +87,8 @@ jobs:
             if echo "$health" | grep -q '"status":"ok"' \
               && echo "$health" | grep -q '"environment":"staging"' \
               && echo "$page" | grep -q '<html lang="ar" dir="rtl">' \
-              && curl -fsS -o /dev/null "$URL/fonts/plex-ar-400.woff2" \
-              && curl -fsS -o /dev/null "$URL/fonts/kufi-ar.woff2" \
+              && curl -fsS -o /dev/null "$URL/fonts/tajawal-ar-400.woff2" \
+              && curl -fsS -o /dev/null "$URL/fonts/tajawal-ar-800.woff2" \
               && curl -fsS -o /dev/null "$URL/app.js"; then
               echo "موقع الاختبار يعمل: $URL"
               echo "### موقع الاختبار يعمل" >> "$GITHUB_STEP_SUMMARY"
