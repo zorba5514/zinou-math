@@ -98,3 +98,15 @@ jobs:
             | sed -e 's/%/%25/g' -e 's/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=موقع الاختبار لا يرد كما يجب::$detail"
           exit 1
+      - name: فحص الجودة على الهاتف (Lighthouse)
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          i=0
+          for path in "/" "/levels/1am"; do
+            i=$((i+1))
+            npx --yes lighthouse@12 "$URL$path" --quiet --output=json --output-path="lh-$i.json" \
+              --only-categories=performance,accessibility,best-practices,seo \
+              --chrome-flags="--headless=new --no-sandbox"
+          done
+          node scripts/lighthouse-check.mjs lh-*.json

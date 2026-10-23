@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 140 1050 935" role="img" aria-label="شعار الأستاذ زين الدين للرياضيات">
+  <path d="M378 983 L148 591 L384 183 L866 183 L1101 591 L871 983" fill="none" stroke="#181818" stroke-width="40" stroke-linejoin="miter" stroke-miterlimit="10"/>
+  <path d="M378 983 L400 1020 L460 1020 L538 981 L622 1029 L708 981 L785 1020 L849 1020 L871 983" fill="none" stroke="#FEC101" stroke-width="39" stroke-linejoin="miter" stroke-miterlimit="10"/>
+  <polygon points="462,330 865,330 440,793 402,793 762,400 465,400 400,441" fill="#FEC101"/>
+  <polygon points="832,403 866,403 440,864 402,864" fill="#181818"/>
+  <polygon points="504,795 778,795 848,744 778,864 440,864" fill="#FEC101"/>
+</svg>
