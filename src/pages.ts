@@ -153,9 +153,9 @@ function graphCard(): Raw {
     <div class="graph-side">
       <p class="formula" dir="ltr" data-formula>${f}</p>
       <p class="graph-note" aria-live="polite"><span data-note>${describe(START_A)}</span><br>يقطع محور التراتيب في النقطة <bdi dir="ltr" data-intercept>${intercept(START_B)}</bdi></p>
-      <div class="controls" data-controls hidden>
-        <label class="control"><span class="control-name">الميل <bdi dir="ltr"><b>a</b> = <output data-out-a>${START_A}</output></bdi></span><input type="range" dir="ltr" min="-3" max="3" step="0.5" value="${START_A}" data-a></label>
-        <label class="control"><span class="control-name">الترتيبة عند المبدأ <bdi dir="ltr"><b>b</b> = <output data-out-b>${START_B}</output></bdi></span><input type="range" dir="ltr" min="-6" max="6" step="1" value="${START_B}" data-b></label>
+      <div class="controls" data-controls>
+        <label class="control"><span class="control-name">الميل <bdi dir="ltr"><b>a</b> = <output data-out-a>${START_A}</output></bdi></span><input type="range" dir="ltr" min="-3" max="3" step="0.5" value="${START_A}" data-a disabled></label>
+        <label class="control"><span class="control-name">الترتيبة عند المبدأ <bdi dir="ltr"><b>b</b> = <output data-out-b>${START_B}</output></bdi></span><input type="range" dir="ltr" min="-6" max="6" step="1" value="${START_B}" data-b disabled></label>
       </div>
     </div>
   </div>

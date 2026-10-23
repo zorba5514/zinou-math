@@ -31,6 +31,8 @@ for (const figure of document.querySelectorAll("[data-graph]")) {
 
   a.addEventListener("input", update);
   b.addEventListener("input", update);
-  controls.hidden = false;
+  // المؤشران معطّلان حتى يعمل الكود، ومكانهما محجوز من البداية فلا تتحرك الصفحة.
+  a.disabled = false;
+  b.disabled = false;
   figure.classList.add("is-live");
 }

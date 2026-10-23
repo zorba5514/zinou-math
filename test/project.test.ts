@@ -49,11 +49,12 @@ test("الصفحات لا تحتوي تنسيقًا أو كودًا مضمّنً
   assert.doesNotMatch(page, /\sstyle="/);
 });
 
-test("الرسم التفاعلي: الصفحة تُظهر الدالة والمستقيم، والمؤشرات مخفية حتى يعمل الكود", () => {
+test("الرسم التفاعلي: الصفحة تُظهر الدالة والمستقيم، والمؤشرات معطّلة حتى يعمل الكود", () => {
   const page = homePage("staging");
   assert.match(page, /data-graph/);
   assert.match(page, /f\(x\) = x \+ 2/);
-  assert.match(page, /<div class="controls" data-controls hidden>/);
+  assert.match(page, /<div class="controls" data-controls>/);
+  assert.equal(page.match(/type="range"[^>]* disabled>/g)?.length, 2);
 });
 
 test("ملفات الهوية موجودة", () => {
