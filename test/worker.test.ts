@@ -109,3 +109,11 @@ test("شريط نسخة الاختبار يظهر في موقع الاختبار
   assert.doesNotMatch(production, /نسخة الاختبار/);
   assert.doesNotMatch(production, /noindex/);
 });
+
+test("قواعد التحميل المسبق تُقدَّم بالنوع الصحيح وتُعلن في كل صفحة", async () => {
+  const rules = await get("/speculation-rules.json");
+  assert.equal(rules.headers.get("Content-Type"), "application/speculationrules+json");
+  assert.ok(Array.isArray((await rules.json()).prerender));
+  const res = await get("/levels");
+  assert.equal(res.headers.get("Speculation-Rules"), '"/speculation-rules.json"');
+});

@@ -22,6 +22,10 @@ export interface Program {
   kind: "level" | "course";
   title: string;
   short: string;
+  /** ما يُكتب داخل السداسي: رقم السنة للمستويات، ورمز للدورات. */
+  mark: string;
+  /** المرحلة تحت الرقم: متوسط أو ثانوي أو دورة. */
+  stage: string;
   units: Unit[];
 }
 
@@ -52,22 +56,22 @@ function sampleUnits(slug: string, count: number, word: string): Unit[] {
   });
 }
 
-function level(slug: string, title: string, short: string): Program {
-  return { slug, kind: "level", title, short, units: sampleUnits(slug, 7, "المقطع") };
+function level(slug: string, title: string, short: string, mark: string, stage: string): Program {
+  return { slug, kind: "level", title, short, mark, stage, units: sampleUnits(slug, 7, "المقطع") };
 }
 
-function course(slug: string, title: string, short: string): Program {
-  return { slug, kind: "course", title, short, units: sampleUnits(slug, 3, "الجزء") };
+function course(slug: string, title: string, mark: string): Program {
+  return { slug, kind: "course", title, short: "دورة", mark, stage: "دورة", units: sampleUnits(slug, 3, "الجزء") };
 }
 
 export const PROGRAMS: readonly Program[] = [
-  level("1am", "السنة الأولى متوسط", "1 متوسط"),
-  level("2am", "السنة الثانية متوسط", "2 متوسط"),
-  level("3am", "السنة الثالثة متوسط", "3 متوسط"),
-  level("4am", "السنة الرابعة متوسط", "4 متوسط"),
-  level("1as", "السنة الأولى ثانوي", "1 ثانوي"),
-  course("mental-math", "الحساب الذهني", "دورة"),
-  course("olympiad", "تحضير الأولمبياد", "دورة"),
+  level("1am", "السنة الأولى متوسط", "1 متوسط", "1", "متوسط"),
+  level("2am", "السنة الثانية متوسط", "2 متوسط", "2", "متوسط"),
+  level("3am", "السنة الثالثة متوسط", "3 متوسط", "3", "متوسط"),
+  level("4am", "السنة الرابعة متوسط", "4 متوسط", "4", "متوسط"),
+  level("1as", "السنة الأولى ثانوي", "1 ثانوي", "1", "ثانوي"),
+  course("mental-math", "الحساب الذهني", "×÷"),
+  course("olympiad", "تحضير الأولمبياد", "∑"),
 ];
 
 export function findProgram(slug: string): Program | undefined {

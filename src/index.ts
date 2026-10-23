@@ -42,12 +42,18 @@ export function json(data: unknown, status = 200): Response {
   });
 }
 
+/** قواعد التحميل المسبق: المتصفح يجهّز الصفحة التالية قبل الضغط، فيبدو التنقل فوريًا. */
+export const SPECULATION_RULES = {
+  prerender: [{ where: { href_matches: "/*" }, eagerness: "moderate" }],
+};
+
 export function page(body: string, status = 200): Response {
   return new Response(body, {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Content-Security-Policy": PAGE_CSP,
+      "Speculation-Rules": '"/speculation-rules.json"',
       ...SECURITY_HEADERS,
     },
   });
@@ -75,6 +81,12 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD", ...SECURITY_HEADERS } });
+  }
+
+  if (path === "/speculation-rules.json") {
+    return new Response(JSON.stringify(SPECULATION_RULES), {
+      headers: { "Content-Type": "application/speculationrules+json", ...SECURITY_HEADERS },
+    });
   }
 
   if (path === "/") return page(homePage(env.APP_ENV));

@@ -53,6 +53,8 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
+      - name: تجهيز الخطوط
+        run: npm run fonts
       - name: النشر
         id: deploy
         env:
@@ -84,7 +86,10 @@ jobs:
             page=$(cat page.html 2>/dev/null || true)
             if echo "$health" | grep -q '"status":"ok"' \
               && echo "$health" | grep -q '"environment":"staging"' \
-              && echo "$page" | grep -q '<html lang="ar" dir="rtl">'; then
+              && echo "$page" | grep -q '<html lang="ar" dir="rtl">' \
+              && curl -fsS -o /dev/null "$URL/fonts/plex-ar-400.woff2" \
+              && curl -fsS -o /dev/null "$URL/fonts/kufi-ar.woff2" \
+              && curl -fsS -o /dev/null "$URL/app.js"; then
               echo "موقع الاختبار يعمل: $URL"
               echo "### موقع الاختبار يعمل" >> "$GITHUB_STEP_SUMMARY"
               echo "$URL" >> "$GITHUB_STEP_SUMMARY"

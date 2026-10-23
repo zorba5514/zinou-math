@@ -1,6 +1,8 @@
 // صفحات الموقع العامة (للزوار)، تُبنى في الخادم وتُرسل جاهزة إلى المتصفح.
+// الهوية: «دفتر المربعات»، صفحة بمربعات زرقاء خفيفة وهامش أحمر، والأصفر قلم تحديد.
 
 import { html, type Raw } from "./html.ts";
+import { describe, formula, intercept, linePath, toY, SIZE, UNIT } from "../public/graph.js";
 import {
   PROGRAMS,
   KIND_LABELS,
@@ -35,21 +37,26 @@ export function layout(opts: {
   current: Nav;
   body: Raw;
   description?: string;
+  scripts?: boolean;
 }): string {
   const fullTitle = opts.title === SITE_NAME ? SITE_NAME : `${opts.title} | ${SITE_NAME}`;
   const staging = opts.env !== "production";
+  const description =
+    opts.description ?? `${SITE_NAME}: ${SLOGAN}. دروس رياضيات من الأولى متوسط إلى الأولى ثانوي.`;
   return html`<!doctype html>
 <html lang="ar" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${fullTitle}</title>
-<meta name="description" content="${opts.description ?? `${SITE_NAME}: ${SLOGAN}. دروس رياضيات من الأولى متوسط إلى الأولى ثانوي.`}">
+<meta name="description" content="${description}">
 ${staging ? html`<meta name="robots" content="noindex">` : ""}
 <meta name="theme-color" content="#181818">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="preload" href="/fonts/plex-ar-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+${opts.scripts ? html`<script type="module" src="/app.js"></script>` : ""}
 </head>
 <body>
 <a class="skip" href="#main">تخطَّ إلى المحتوى</a>
@@ -57,7 +64,7 @@ ${staging ? html`<p class="staging">نسخة الاختبار: المحتوى ا
 <header class="site-header">
   <div class="wrap header-row">
     <a class="brand" href="/">
-      <img src="/brand/logo.svg" alt="" width="44" height="39">
+      <img src="/brand/logo.svg" alt="" width="40" height="36">
       <span>${SITE_NAME}</span>
     </a>
     <nav aria-label="القائمة الرئيسية">
@@ -67,25 +74,36 @@ ${staging ? html`<p class="staging">نسخة الاختبار: المحتوى ا
     </nav>
   </div>
 </header>
-<main id="main" class="wrap">
+<main id="main" class="paper">
+<div class="wrap">
 ${opts.body}
+</div>
 </main>
 <footer class="site-footer">
-  <div class="wrap">
-    <p><strong>${SITE_NAME}</strong> · ${SLOGAN}</p>
+  <div class="wrap footer-row">
+    <img src="/brand/logo.svg" alt="" width="36" height="32">
+    <p><strong>${SITE_NAME}</strong><br>${SLOGAN}</p>
   </div>
 </footer>
 </body>
 </html>`.value;
 }
 
-function programCard(program: Program): Raw {
-  const { total, free } = countItems(program);
+function hexMark(program: Program, size: "sm" | "lg" = "sm"): Raw {
+  return html`<span class="hex hex-${size}${program.kind === "course" ? " hex-course" : ""}" aria-hidden="true"><span class="hex-mark">${program.mark}</span><span class="hex-stage">${program.stage}</span></span>`;
+}
+
+function programTile(program: Program): Raw {
+  const { free } = countItems(program);
+  const parts = program.kind === "level" ? "مقاطع" : "أجزاء";
+  const freeBadge = free > 0 ? html` <span class="badge badge-free">فيه دروس مجانية</span>` : "";
   return html`<li>
-  <a class="card" href="/levels/${program.slug}">
-    <span class="card-tag">${program.short}</span>
-    <span class="card-title">${program.title}</span>
-    <span class="card-meta">${program.units.length} ${program.kind === "level" ? "مقاطع" : "أجزاء"} · ${total} عنصرًا، منها ${free} مجانًا</span>
+  <a class="tile${program.kind === "course" ? " tile-course" : ""}" href="/levels/${program.slug}">
+    ${hexMark(program)}
+    <span class="tile-text">
+      <span class="tile-title">${program.title}</span>
+      <span class="tile-meta">${program.units.length} ${parts}${freeBadge}</span>
+    </span>
   </a>
 </li>`;
 }
@@ -94,13 +112,43 @@ function programGrids(): Raw {
   const levels = PROGRAMS.filter((p) => p.kind === "level");
   const courses = PROGRAMS.filter((p) => p.kind === "course");
   return html`<section aria-labelledby="levels-title">
-  <h2 id="levels-title">المستويات الدراسية</h2>
-  <ul class="grid">${levels.map(programCard)}</ul>
+  <h2 id="levels-title"><span class="marker">المستويات الدراسية</span></h2>
+  <ul class="tiles">${levels.map(programTile)}</ul>
 </section>
 <section aria-labelledby="courses-title">
-  <h2 id="courses-title">دورات خاصة</h2>
-  <ul class="grid">${courses.map(programCard)}</ul>
+  <h2 id="courses-title"><span class="marker">دورات خاصة</span></h2>
+  <ul class="tiles">${courses.map(programTile)}</ul>
 </section>`;
+}
+
+const START_A = 1;
+const START_B = 2;
+
+function graphFigure(): Raw {
+  const f = formula(START_A, START_B);
+  const mid = SIZE / 2;
+  return html`<figure class="graph" data-graph>
+  <svg viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="رسم المستقيم ${f}">
+    <defs>
+      <pattern id="squares" width="${UNIT}" height="${UNIT}" patternUnits="userSpaceOnUse"><path d="M${UNIT} 0H0V${UNIT}" class="grid-line"/></pattern>
+      <clipPath id="frame"><rect width="${SIZE}" height="${SIZE}"/></clipPath>
+    </defs>
+    <rect width="${SIZE}" height="${SIZE}" fill="url(#squares)"/>
+    <path class="axis" d="M0 ${mid}H${SIZE}M${mid} 0V${SIZE}"/>
+    <text class="axis-label" x="${SIZE - 12}" y="${mid - 8}">x</text>
+    <text class="axis-label" x="${mid + 8}" y="16">y</text>
+    <g clip-path="url(#frame)"><path class="fx" data-line pathLength="1" d="${linePath(START_A, START_B)}"/></g>
+    <circle class="pt" data-point cx="${mid}" cy="${toY(START_B)}" r="7"/>
+  </svg>
+  <figcaption>
+    <p class="formula" dir="ltr" data-formula>${f}</p>
+    <p class="graph-note" aria-live="polite"><span data-note>${describe(START_A)}</span><br>يقطع محور التراتيب في النقطة <bdi dir="ltr" data-intercept>${intercept(START_B)}</bdi></p>
+    <div class="controls" data-controls hidden>
+      <label class="control"><span class="control-name">الميل <bdi dir="ltr"><b>a</b> = <output data-out-a>${START_A}</output></bdi></span><input type="range" dir="ltr" min="-3" max="3" step="0.5" value="${START_A}" data-a></label>
+      <label class="control"><span class="control-name">الترتيبة عند المبدأ <bdi dir="ltr"><b>b</b> = <output data-out-b>${START_B}</output></bdi></span><input type="range" dir="ltr" min="-6" max="6" step="1" value="${START_B}" data-b></label>
+    </div>
+  </figcaption>
+</figure>`;
 }
 
 export function homePage(env: string): string {
@@ -108,19 +156,22 @@ export function homePage(env: string): string {
     title: SITE_NAME,
     env,
     current: "home",
+    scripts: true,
     body: html`<section class="hero">
-  <img class="hero-logo" src="/brand/logo.svg" alt="شعار ${SITE_NAME}" width="160" height="142">
-  <h1>${SITE_NAME}</h1>
-  <p class="slogan">${SLOGAN}</p>
-  <p class="lead">دروس مسجلة وملفات واختبارات في الرياضيات، من الأولى متوسط إلى الأولى ثانوي.</p>
-  <div class="actions">
-    <a class="btn btn-primary" href="/levels">تصفّح الدروس</a>
-    <a class="btn btn-secondary" href="/subscribe">طريقة الاشتراك</a>
+  <div class="hero-text">
+    <h1>${SITE_NAME}</h1>
+    <p class="slogan"><span class="marker">${SLOGAN}</span></p>
+    <p class="lead">حرّك المؤشرين وشاهد المستقيم يتغير على دفتر المربعات. هكذا نشرح كل درس: نفهم قبل أن نحفظ.</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="/levels">تصفّح الدروس</a>
+      <a class="btn btn-secondary" href="/subscribe">طريقة الاشتراك</a>
+    </div>
   </div>
+  ${graphFigure()}
 </section>
 ${programGrids()}
 <section aria-labelledby="how-title">
-  <h2 id="how-title">كيف تعمل المنصة</h2>
+  <h2 id="how-title"><span class="marker">كيف تعمل المنصة</span></h2>
   <ol class="steps">
     <li><strong>اختر المستوى</strong><span>تصفّح الدروس المجانية دون حساب.</span></li>
     <li><strong>اشترك مع الأستاذ</strong><span>يفعّل الأستاذ حساب العائلة بعد الدفع.</span></li>
@@ -161,21 +212,32 @@ function itemRow(item: Item): Raw {
 </li>`;
 }
 
-function unitSection(unit: Unit): Raw {
-  return html`<section class="unit" aria-labelledby="${unit.id}">
-  <h2 id="${unit.id}">${unit.title}</h2>
-  <ul class="items">${unit.items.map(itemRow)}</ul>
-</section>`;
+function unitBlock(unit: Unit, index: number): Raw {
+  const free = unit.items.filter((i) => i.free).length;
+  const summary = html`<summary>
+    <span class="unit-num" aria-hidden="true">${index + 1}</span>
+    <span class="unit-text"><span class="unit-title" id="${unit.id}">${unit.title}</span><span class="unit-meta">${unit.items.length} عناصر${free ? html`، منها ${free} مجانًا` : ""}</span></span>
+    <span class="unit-chevron" aria-hidden="true"></span>
+  </summary>
+  <ul class="items">${unit.items.map(itemRow)}</ul>`;
+  return index === 0
+    ? html`<details class="unit" open>${summary}</details>`
+    : html`<details class="unit">${summary}</details>`;
 }
 
 export function programPage(env: string, program: Program): string {
+  const { free, total } = countItems(program);
   return layout({
     title: program.title,
     env,
     current: "levels",
     body: html`<nav class="crumbs" aria-label="مسار التصفح"><a href="/levels">الدروس</a> / <span aria-current="page">${program.title}</span></nav>
-<h1>${program.title}</h1>
-${program.units.map(unitSection)}`,
+<header class="program-head">
+  ${hexMark(program, "lg")}
+  <h1>${program.title}</h1>
+</header>
+<p class="lead program-lead">${program.units.length} ${program.kind === "level" ? "مقاطع" : "أجزاء"}، و${total} عنصرًا منها ${free} مجانًا. اضغط على ${program.kind === "level" ? "المقطع" : "الجزء"} لعرض دروسه.</p>
+<div class="units">${program.units.map(unitBlock)}</div>`,
   });
 }
 
@@ -204,15 +266,15 @@ ${
     : ""
 }
 <section aria-labelledby="plans-title">
-  <h2 id="plans-title">الباقات</h2>
-  <ul class="grid plans">
-    <li class="plan"><span class="card-title">باقة الفصل</span><span class="card-meta">كل دروس المستوى لفصل دراسي كامل.</span></li>
-    <li class="plan"><span class="card-title">الباقة السنوية</span><span class="card-meta">كل دروس المستوى للسنة الدراسية.</span></li>
-    <li class="plan"><span class="card-title">الدورات الخاصة</span><span class="card-meta">كل دورة مفتوحة سنة كاملة من تاريخ التفعيل.</span></li>
+  <h2 id="plans-title"><span class="marker">الباقات</span></h2>
+  <ul class="plans">
+    <li class="plan"><strong>باقة الفصل</strong><span>كل دروس المستوى لفصل دراسي كامل.</span></li>
+    <li class="plan plan-main"><strong>الباقة السنوية</strong><span>كل دروس المستوى للسنة الدراسية.</span></li>
+    <li class="plan"><strong>الدورات الخاصة</strong><span>كل دورة مفتوحة سنة كاملة من تاريخ التفعيل.</span></li>
   </ul>
 </section>
 <section aria-labelledby="steps-title">
-  <h2 id="steps-title">طريقة الاشتراك</h2>
+  <h2 id="steps-title"><span class="marker">طريقة الاشتراك</span></h2>
   <ol class="steps">
     <li><strong>تواصل مع الأستاذ</strong><span>لاختيار الباقة المناسبة.</span></li>
     <li><strong>ادفع</strong><span>حسب معلومات الدفع التي يرسلها الأستاذ.</span></li>

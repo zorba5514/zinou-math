@@ -12,9 +12,12 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
     "dev": "wrangler dev --env staging",
-    "deploy:staging": "wrangler deploy --env staging"
+    "deploy:staging": "wrangler deploy --env staging",
+    "fonts": "node scripts/copy-fonts.mjs"
   },
   "devDependencies": {
+    "@fontsource-variable/reem-kufi": "^5.0.0",
+    "@fontsource/ibm-plex-sans-arabic": "^5.0.0",
     "@types/node": "^22.0.0",
     "typescript": "^6.0.0",
     "wrangler": "^4.0.0"
