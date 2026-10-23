@@ -38,7 +38,7 @@
 
 | الاسم | الاستعمال |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | مفتاح النشر على Cloudflare. صلاحياته: Workers وD1 لحساب واحد. إن كانت له مدة صلاحية، يجب تجديده قبل انتهائها وإلا يتوقف النشر. |
+| `CLOUDFLARE_API_TOKEN` | مفتاح النشر على Cloudflare. صلاحياته: Workers وD1 لحساب واحد. بدون تاريخ انتهاء، لذلك يجب حذفه واستبداله فورًا إذا شككت في تسرّبه. |
 | `CLOUDFLARE_ACCOUNT_ID` | معرّف حساب Cloudflare. |
 
 إذا شككت أن المفتاح تسرّب: احذفه من Cloudflare (Manage account ← Account API tokens)، وأنشئ مفتاحًا جديدًا، وضعه مكان القديم في GitHub.
