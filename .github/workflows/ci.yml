@@ -18,8 +18,8 @@ jobs:
     name: الاختبارات
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
@@ -32,7 +32,7 @@ jobs:
     name: فحص الأسرار
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -48,8 +48,8 @@ jobs:
       group: deploy-staging
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
@@ -60,7 +60,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -o pipefail
-          npx wrangler deploy --env staging 2>&1 | tee deploy.log
+          if ! npx wrangler deploy --env staging 2>&1 | tee deploy.log; then
+            # نعرض آخر أسطر الخطأ كتنبيه يظهر في صفحة التشغيل مباشرة.
+            msg=$(tail -25 deploy.log | sed -e 's/%/%25/g' -e 's/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=فشل النشر::$msg"
+            exit 1
+          fi
           url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -1)
           if [ -z "$url" ]; then
             echo "لم يُعثر على رابط موقع الاختبار في مخرجات النشر" >&2
