@@ -76,9 +76,12 @@ jobs:
         env:
           URL: ${{ steps.deploy.outputs.url }}
         run: |
-          for i in $(seq 1 12); do
-            health=$(curl -fsS "$URL/api/health" || true)
-            page=$(curl -fsS "$URL/" || true)
+          # الانتظار حتى 5 دقائق: النطاق الفرعي الجديد على workers.dev قد يتأخر في العمل.
+          for i in $(seq 1 30); do
+            health_code=$(curl -sS -o health.txt -w '%{http_code}' "$URL/api/health" 2>curl.err || true)
+            page_code=$(curl -sS -o page.html -w '%{http_code}' "$URL/" 2>>curl.err || true)
+            health=$(cat health.txt 2>/dev/null || true)
+            page=$(cat page.html 2>/dev/null || true)
             if echo "$health" | grep -q '"status":"ok"' \
               && echo "$health" | grep -q '"environment":"staging"' \
               && echo "$page" | grep -q '<html lang="ar" dir="rtl">'; then
@@ -87,8 +90,11 @@ jobs:
               echo "$URL" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            sleep 5
+            sleep 10
           done
-          echo "موقع الاختبار لا يرد كما يجب" >&2
-          echo "health: $health" >&2
+          detail=$(printf 'URL: %s\nhealth HTTP %s: %s\npage HTTP %s: %s\ncurl: %s' \
+            "$URL" "$health_code" "$(head -c 300 health.txt 2>/dev/null)" \
+            "$page_code" "$(head -c 300 page.html 2>/dev/null)" "$(tail -3 curl.err 2>/dev/null)" \
+            | sed -e 's/%/%25/g' -e 's/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=موقع الاختبار لا يرد كما يجب::$detail"
           exit 1
