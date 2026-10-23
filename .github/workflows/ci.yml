@@ -1,0 +1,89 @@
+# الفحص والنشر الآلي.
+# كل تغيير يُرفع إلى GitHub يمر بثلاث مراحل:
+#   1. الاختبارات وفحص الأنواع.
+#   2. البحث عن أي كلمة مرور أو مفتاح داخل الكود.
+#   3. النشر على موقع الاختبار، فقط إذا نجحت المرحلتان السابقتان.
+name: الفحص والنشر
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: الاختبارات
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: فحص الأنواع
+        run: npm run typecheck
+      - name: الاختبارات الآلية
+        run: npm test
+
+  secret-scan:
+    name: فحص الأسرار
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-staging:
+    name: النشر على موقع الاختبار
+    needs: [test, secret-scan]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - name: النشر
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          npx wrangler deploy --env staging 2>&1 | tee deploy.log
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then
+            echo "لم يُعثر على رابط موقع الاختبار في مخرجات النشر" >&2
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: التحقق من موقع الاختبار بعد النشر
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          for i in $(seq 1 12); do
+            health=$(curl -fsS "$URL/api/health" || true)
+            page=$(curl -fsS "$URL/" || true)
+            if echo "$health" | grep -q '"status":"ok"' \
+              && echo "$health" | grep -q '"environment":"staging"' \
+              && echo "$page" | grep -q '<html lang="ar" dir="rtl">'; then
+              echo "موقع الاختبار يعمل: $URL"
+              echo "### موقع الاختبار يعمل" >> "$GITHUB_STEP_SUMMARY"
+              echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "موقع الاختبار لا يرد كما يجب" >&2
+          echo "health: $health" >&2
+          exit 1

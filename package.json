@@ -1,0 +1,22 @@
+{
+  "name": "zinou-math",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "منصة الأستاذ زين الدين للرياضيات",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test",
+    "dev": "wrangler dev --env staging",
+    "deploy:staging": "wrangler deploy --env staging"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

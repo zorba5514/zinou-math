@@ -1,0 +1,21 @@
+# إعدادات النشر على Cloudflare.
+# لا توضع هنا أي كلمة مرور أو مفتاح: الأسرار تُحفظ في خزائن GitHub وCloudflare.
+
+name = "zinou-math"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[vars]
+APP_ENV = "production"
+
+# موقع الاختبار: نسخة منفصلة تمامًا عن الموقع الحقيقي.
+[env.staging]
+name = "zinou-math-staging"
+workers_dev = true
+
+[env.staging.vars]
+APP_ENV = "staging"
