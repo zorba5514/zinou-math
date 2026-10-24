@@ -9,8 +9,19 @@ export const SLOGAN = "الرياضيات كما يجب أن تكون";
 
 /** من يتصفح الصفحة الآن: زائر (null) أو ولي أو الأستاذ. */
 export interface Viewer {
+  /** اسم الملف الظاهر: اسم الابن أو الولي أو الأستاذ */
   name: string;
   role: "parent" | "admin";
+  /** للعائلات: الملف المختار بعد الدخول، أو null قبل الاختيار */
+  profile?: "parent" | "student" | null;
+}
+
+/** الصفحة الرئيسية لمن دخل: لوحة التحكم، أو صفحة الابن، أو صفحة الولي، أو اختيار الملف. */
+export function viewerHome(v: Viewer): string {
+  if (v.role === "admin") return "/admin";
+  if (v.profile === "student") return "/home";
+  if (v.profile === "parent") return "/account";
+  return "/profiles";
 }
 
 export interface View {
@@ -24,6 +35,8 @@ export type NavKey =
   | "subscribe"
   | "login"
   | "account"
+  | "student-home"
+  | "profiles"
   | "admin"
   | "families"
   | "new-family"
@@ -59,12 +72,14 @@ function drawerFooter(view: View): Raw {
       <span><strong>تسجيل الدخول</strong><small>برقم هاتف الولي</small></span>
     </a>`;
   }
-  const home = v.role === "admin" ? "/admin" : "/account";
+  const subtitle =
+    v.role === "admin" ? "الأستاذ" : v.profile === "student" ? "ملف الابن" : v.profile === "parent" ? "ملف الولي" : "اختر الملف";
   return html`<div class="drawer-user">
-    <a class="drawer-card" href="${home}">
+    <a class="drawer-card" href="${viewerHome(v)}">
       <span class="drawer-card-icon drawer-avatar">${initial(v.name)}</span>
-      <span><strong>${v.name}</strong><small>${v.role === "admin" ? "الأستاذ" : "حساب العائلة"}</small></span>
+      <span><strong>${v.name}</strong><small>${subtitle}</small></span>
     </a>
+    ${v.role === "parent" && v.profile ? html`<a class="drawer-switch" href="/profiles">${icon("users")}تبديل الملف</a>` : ""}
     ${logoutForm("drawer-logout")}
   </div>`;
 }
@@ -87,7 +102,9 @@ function drawerNav(area: "public" | "admin", view: View, current: NavKey): Raw {
       ${navItem("/", "الرئيسية", "home", "home", current)}
       ${navItem("/levels", "الدروس", "book", "levels", current)}
       ${navItem("/subscribe", "الاشتراك", "card", "subscribe", current)}
-      ${view.viewer?.role === "parent" ? navItem("/account", "حسابي", "user", "account", current) : ""}
+      ${view.viewer?.role === "parent" && view.viewer.profile === "student" ? navItem("/home", "صفحتي", "user", "student-home", current) : ""}
+      ${view.viewer?.role === "parent" && view.viewer.profile === "parent" ? navItem("/account", "حساب العائلة", "users", "account", current) : ""}
+      ${view.viewer?.role === "parent" && !view.viewer.profile ? navItem("/profiles", "اختيار الملف", "users", "profiles", current) : ""}
       ${view.viewer?.role === "admin" ? navItem("/admin", "لوحة التحكم", "layers", "admin", current) : ""}
     </nav>`;
 }

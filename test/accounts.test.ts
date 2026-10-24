@@ -1,108 +1,7 @@
 // اختبارات المرحلة 2 من أولها إلى آخرها: كل طلب يمر بالخادم الحقيقي وقاعدة بيانات حقيقية (SQLite).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleRequest, type Env } from "../src/index.ts";
-import { createTestDb } from "./helpers/d1.ts";
-import { base32Decode, totpAt } from "../src/crypto.ts";
-
-const BASE = "https://zinou.test";
-const SETUP_CODE = "رمز-تأسيس-تجريبي-طويل";
-const ADMIN = { name: "الأستاذ زين الدين", phone: "0555000111", password: "Admin-Pass-2026" };
-
-type TestEnv = Env & { DB: ReturnType<typeof createTestDb> };
-
-function makeEnv(setupCode: string | null = SETUP_CODE): TestEnv {
-  return {
-    APP_ENV: "staging",
-    DB: createTestDb(),
-    ADMIN_SETUP_CODE: setupCode ?? undefined,
-    PASSWORD_ITERATIONS: "1000",
-    ASSETS: { fetch: async () => new Response("missing", { status: 404 }) },
-  };
-}
-
-/** متصفح صغير للاختبار: يحفظ الكعكات ويرسل ترويسة Origin مع النماذج. */
-class Browser {
-  env: TestEnv;
-  jar = new Map<string, string>();
-  last: Response | null = null;
-  constructor(env: TestEnv) {
-    this.env = env;
-  }
-  async request(path: string, init: RequestInit = {}): Promise<Response> {
-    const headers = new Headers(init.headers);
-    if (this.jar.size) headers.set("Cookie", [...this.jar].map(([k, v]) => `${k}=${v}`).join("; "));
-    headers.set("User-Agent", "Mozilla/5.0 (Linux; Android 14) Chrome/130.0 Mobile");
-    const res = await handleRequest(new Request(BASE + path, { ...init, headers }), this.env);
-    for (const c of res.headers.getSetCookie()) {
-      const [pair] = c.split(";");
-      const i = (pair ?? "").indexOf("=");
-      const name = (pair ?? "").slice(0, i);
-      const value = (pair ?? "").slice(i + 1);
-      if (/Max-Age=0/.test(c) || !value) this.jar.delete(name);
-      else this.jar.set(name, value);
-    }
-    this.last = res;
-    return res;
-  }
-  get(path: string) {
-    return this.request(path);
-  }
-  post(path: string, fields: Record<string, string>) {
-    return this.request(path, {
-      method: "POST",
-      headers: { Origin: BASE, "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(fields).toString(),
-    });
-  }
-}
-
-function hiddenValue(htmlText: string, name: string): string {
-  const m = new RegExp(`name="${name}" value="([^"]+)"`).exec(htmlText);
-  assert.ok(m, `الحقل ${name} غير موجود`);
-  return m[1] ?? "";
-}
-
-async function code(secret: string, now = Date.now()): Promise<string> {
-  return totpAt(base32Decode(secret), now);
-}
-
-/** ينشئ حساب الأستاذ عبر صفحة التأسيس، ويُرجع المتصفح والمفتاح ورموز الطوارئ. */
-async function setupAdmin(env: TestEnv) {
-  const b = new Browser(env);
-  const form = await (await b.get("/setup")).text();
-  const secret = hiddenValue(form, "secret");
-  const res = await b.post("/setup", {
-    setup_code: SETUP_CODE,
-    secret,
-    name: ADMIN.name,
-    phone: ADMIN.phone,
-    password: ADMIN.password,
-    confirm: ADMIN.password,
-    totp: await code(secret),
-  });
-  assert.equal(res.status, 200);
-  const page = await res.text();
-  const codes = [...page.matchAll(/<li>([a-z0-9]{5}-[a-z0-9]{5})<\/li>/g)].map((m) => m[1] ?? "");
-  return { b, secret, codes };
-}
-
-async function createFamily(b: Browser, fields: Record<string, string>) {
-  const res = await b.post("/admin/families/new", fields);
-  const text = await res.text();
-  const password = /data-copy-source="password">([a-z0-9-]+)</.exec(text)?.[1];
-  return { res, text, password };
-}
-
-const FAMILY = {
-  name: "عائلة بن علي",
-  phone: "0661 22 33 44",
-  note: "",
-  child_name_1: "ياسين بن علي",
-  child_level_1: "2am",
-  child_name_2: "مريم بن علي",
-  child_level_2: "4am",
-};
+import { ADMIN, BASE, Browser, FAMILY, SETUP_CODE, code, createFamily, hiddenValue, makeEnv, setupAdmin } from "./helpers/family.ts";
 
 // ---------- التأسيس ----------
 
@@ -236,7 +135,7 @@ test("إنشاء العائلة يرفض الرقم المكرر والعائل�
   assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM accounts WHERE role = 'parent'").get()?.n, 1);
 });
 
-test("الولي: أول دخول يفرض تغيير كلمة المرور، ثم يرى أبناءه", async () => {
+test("الولي: أول دخول يفرض تغيير كلمة المرور، ثم يختار الملف ويرى أبناءه", async () => {
   const env = makeEnv();
   const { b: admin } = await setupAdmin(env);
   const { password } = await createFamily(admin, FAMILY);
@@ -253,7 +152,10 @@ test("الولي: أول دخول يفرض تغيير كلمة المرور، ث
   const mismatch = await parent.post("/account/password", { password: "Nouvelle-2026", confirm: "Autre-2026" });
   assert.match(await mismatch.text(), /غير متطابقتين/);
   const changed = await parent.post("/account/password", { password: "Nouvelle-2026", confirm: "Nouvelle-2026" });
-  assert.equal(changed.headers.get("Location"), "/account");
+  assert.equal(changed.headers.get("Location"), "/profiles");
+  const profiles = await (await parent.get("/profiles")).text();
+  assert.match(profiles, /من يستعمل المنصة الآن؟/);
+  assert.equal((await parent.post("/profiles/select", { kind: "parent" })).headers.get("Location"), "/account");
 
   const page = await (await parent.get("/account")).text();
   assert.match(page, /ياسين بن علي/);
@@ -263,7 +165,8 @@ test("الولي: أول دخول يفرض تغيير كلمة المرور، ث
   // كلمة المرور المؤقتة لم تعد صالحة، والجديدة تعمل
   const other = new Browser(env);
   assert.equal((await other.post("/login", { phone: "0661223344", password: password ?? "" })).status, 400);
-  assert.equal((await other.post("/login", { phone: "0661223344", password: "Nouvelle-2026" })).headers.get("Location"), "/account");
+  // متصفح آخر = جهاز ثانٍ: ينتظر موافقة الأستاذ
+  assert.equal((await other.post("/login", { phone: "0661223344", password: "Nouvelle-2026" })).headers.get("Location"), "/login/device");
 });
 
 test("القفل: 5 محاولات خاطئة توقف الدخول 15 دقيقة، والأستاذ يستطيع رفع القفل", async () => {
@@ -334,11 +237,11 @@ test("إيقاف الحساب يُخرج الولي فورًا ويمنع دخو
   const parent = new Browser(env);
   await parent.post("/login", { phone: "0661223344", password: password ?? "" });
   await parent.post("/account/password", { password: "Nouvelle-2026", confirm: "Nouvelle-2026" });
-  assert.equal((await parent.get("/account")).status, 200);
+  assert.equal((await parent.get("/profiles")).status, 200);
 
   const id = Number(env.DB.raw.prepare("SELECT id FROM accounts WHERE phone = '0661223344'").get()?.id);
   await admin.post(`/admin/families/${id}/status`, { status: "disabled" });
-  assert.equal((await parent.get("/account")).status, 303);
+  assert.equal((await parent.get("/profiles")).headers.get("Location"), "/login?next=%2Fprofiles");
   const refused = await new Browser(env).post("/login", { phone: "0661223344", password: "Nouvelle-2026" });
   assert.match(await refused.text(), /هذا الحساب موقوف/);
 

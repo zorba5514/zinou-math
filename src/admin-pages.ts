@@ -5,7 +5,7 @@ import { icon } from "./icons.ts";
 import { alertBox, input, layout, phoneExample, select, type View } from "./ui.ts";
 import { PROGRAMS, findProgram } from "./catalog.ts";
 import { formatPhone, whatsappNumber } from "./phone.ts";
-import type { Account, Student } from "./db.ts";
+import type { Account, Device, Student } from "./db.ts";
 
 export const LEVEL_OPTIONS = PROGRAMS.filter((p) => p.kind === "level").map((p) => ({ value: p.slug, label: p.title }));
 export const CHILD_SLOTS = 4;
@@ -40,13 +40,51 @@ function adminLayout(view: View, title: string, current: Parameters<typeof layou
   return layout({ title, view, current, body, area: "admin", scripts });
 }
 
+// ---------- الأجهزة ----------
+
+/** زر صغير يرسل إجراءً على جهاز، ويعود إلى الصفحة التي جاء منها. */
+function deviceAction(id: number, action: "approve" | "remove", back: string, label: string, className: string): Raw {
+  return html`<form method="post" action="/admin/devices/${String(id)}/${action}">
+  <input type="hidden" name="back" value="${back}">
+  <button class="${className}" type="submit">${label}</button>
+</form>`;
+}
+
+function pendingDevicesSection(devices: PendingDevice[]): Raw {
+  if (!devices.length) return html``;
+  return html`<section class="section" aria-labelledby="dev-title">
+  <h2 id="dev-title">أجهزة بانتظار موافقتك <span class="pill pill-warning">${devices.length}</span></h2>
+  <ul class="card device-list">${devices.map(
+    (d) => html`<li>
+    <span class="icon-box icon-box-sm icon-box-soft">${icon("phone")}</span>
+    <span class="device-main"><strong><a href="/admin/families/${String(d.account_id)}">${d.name}</a></strong><small>${d.label ?? "جهاز"} · <bdi dir="ltr">${formatPhone(d.phone)}</bdi> · ${when(d.created_at)}</small></span>
+    <span class="device-actions">
+      ${deviceAction(d.id, "approve", "dashboard", "موافقة", "btn btn-primary btn-sm")}
+      ${deviceAction(d.id, "remove", "dashboard", "رفض", "btn btn-secondary btn-sm")}
+    </span>
+  </li>`,
+  )}</ul>
+  <p class="muted small">وافق فقط إذا طلب منك الولي ذلك. الجهاز المرفوض لا يستطيع الدخول.</p>
+</section>`;
+}
+
 // ---------- لوحة التحكم ----------
+
+export interface PendingDevice {
+  id: number;
+  label: string | null;
+  created_at: number;
+  account_id: number;
+  name: string;
+  phone: string;
+}
 
 export interface DashboardData {
   families: number;
   students: number;
   locked: number;
   pending: number;
+  devices: PendingDevice[];
   recent: { at: number; action: string; detail: string | null; name: string | null }[];
 }
 
@@ -64,6 +102,15 @@ const ACTION_LABELS: Record<string, string> = {
   "admin.created": "إنشاء حساب الأستاذ",
   "device.trusted": "اعتماد جهاز للأستاذ",
   "recovery_code.used": "استعمال رمز طوارئ",
+  "device.first": "أول جهاز للعائلة",
+  "device.requested": "طلب جهاز جديد",
+  "device.approved": "الموافقة على جهاز",
+  "device.removed": "إزالة جهاز",
+  "devices.reset": "إعادة ضبط الأجهزة",
+  "pins.cleared": "مسح رموز الملفات",
+  "pin.set": "وضع رمز ملف",
+  "pin.cleared": "إزالة رمز ملف",
+  "pin.locked": "قفل ملف بعد رموز خاطئة",
   login: "تسجيل دخول",
   logout: "تسجيل خروج",
 };
@@ -92,6 +139,7 @@ export function dashboardPage(view: View, d: DashboardData): string {
     <a class="btn btn-secondary" href="/admin/families">${icon("users")}كل العائلات</a>
   </div>
 </section>
+${pendingDevicesSection(d.devices)}
 <ul class="stats stats-4">
   <li class="card stat"><span class="icon-box">${icon("users")}</span><strong>${d.families}</strong><span class="muted">عائلة</span></li>
   <li class="card stat"><span class="icon-box icon-box-soft">${icon("user")}</span><strong>${d.students}</strong><span class="muted">تلميذ</span></li>
@@ -255,6 +303,10 @@ const DONE_MESSAGES: Record<string, string> = {
   unlock: "رُفع القفل. يمكن للولي الدخول الآن.",
   disabled: "أُوقف الحساب وخرج من كل الأجهزة.",
   enabled: "فُعّل الحساب.",
+  "device-approved": "تمت الموافقة على الجهاز. يستطيع الولي الدخول منه الآن.",
+  "device-removed": "أُزيل الجهاز وخرج من الحساب.",
+  "devices-reset": "حُذفت كل الأجهزة. أول جهاز يدخل منه الولي سيُعتمد تلقائيًا.",
+  "pins-cleared": "أُزيلت رموز كل الملفات.",
 };
 
 export function familyPage(
@@ -262,6 +314,7 @@ export function familyPage(
   o: {
     account: Account;
     students: Student[];
+    devices: Device[];
     now: number;
     done?: string | null;
     errors?: Record<string, string>;
@@ -301,7 +354,7 @@ ${alertBox(Object.keys(e).length ? "راجع الخانات المشار إلي�
       <details class="kid">
         <summary>
           <span class="avatar avatar-sm">${s.name.trim().charAt(0)}</span>
-          <span class="kid-main"><span class="kid-name">${s.name}</span><span class="item-kind">${levelTitle(s.level)}${s.status === "disabled" ? " · موقوف" : ""}</span></span>
+          <span class="kid-main"><span class="kid-name">${s.name}</span><span class="item-kind">${levelTitle(s.level)}${s.status === "disabled" ? " · موقوف" : ""}${s.pin_hash ? " · له رمز" : ""}</span></span>
           <span class="kid-edit">${icon("pencil", "icon icon-sm")}تعديل</span>
         </summary>
         <form method="post" action="/admin/students/${String(s.id)}/edit" class="form" novalidate>
@@ -333,6 +386,36 @@ ${alertBox(Object.keys(e).length ? "راجع الخانات المشار إلي�
       ${input({ name: "note", label: "ملاحظة خاصة بك", value: v.note ?? account.note ?? "", maxlength: 300 })}
       <button class="btn btn-primary btn-sm" type="submit">حفظ</button>
     </form>
+  </section>
+
+  <section class="card form-card" aria-labelledby="devices">
+    <h2 id="devices">الأجهزة</h2>
+    ${
+      o.devices.length
+        ? html`<ul class="device-list device-list-plain">${o.devices.map(
+            (d) => html`<li>
+      <span class="icon-box icon-box-sm icon-box-soft">${icon("phone")}</span>
+      <span class="device-main"><strong>${d.label ?? "جهاز"}</strong><small>${d.status === "approved" ? html`معتمد${d.last_used_at ? html` · آخر استعمال ${when(d.last_used_at)}` : ""}` : html`بانتظار موافقتك · ${when(d.created_at)}`}</small></span>
+      <span class="device-actions">
+        ${d.status === "pending" ? deviceAction(d.id, "approve", "family", "موافقة", "btn btn-primary btn-sm") : ""}
+        ${deviceAction(d.id, "remove", "family", d.status === "pending" ? "رفض" : "إزالة", "btn btn-secondary btn-sm")}
+      </span>
+    </li>`,
+          )}</ul>`
+        : html`<p class="muted">لم يدخل الولي من أي جهاز بعد. أول جهاز يدخل منه يُعتمد تلقائيًا.</p>`
+    }
+    <div class="action-list">
+      <form method="post" action="/admin/families/${id}/reset-devices">
+        <button class="action-row" type="submit">${icon("phone")}<span><strong>إعادة ضبط الأجهزة</strong><small>إذا غيّر الولي هاتفه. تُحذف كل الأجهزة، ويُعتمد أول جهاز يدخل منه بعدها.</small></span></button>
+      </form>
+      ${
+        account.parent_pin_hash || students.some((s) => s.pin_hash)
+          ? html`<form method="post" action="/admin/families/${id}/clear-pins">
+        <button class="action-row" type="submit">${icon("unlock")}<span><strong>مسح رموز الملفات</strong><small>إذا نسيت العائلة رمز أحد الملفات. تُزال الرموز الأربعة الأرقام كلها.</small></span></button>
+      </form>`
+          : ""
+      }
+    </div>
   </section>
 
   <section class="card form-card" aria-labelledby="access">

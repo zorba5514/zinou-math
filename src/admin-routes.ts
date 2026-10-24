@@ -1,6 +1,6 @@
 // مسارات لوحة تحكم الأستاذ.
 
-import { audit, type Account, type Student } from "./db.ts";
+import { audit, type Account, type Device, type Student } from "./db.ts";
 import { endOtherSessions, passwordIterations } from "./auth.ts";
 import { hashPassword, temporaryPassword } from "./crypto.ts";
 import { field, page, readForm, redirect } from "./http.ts";
@@ -15,6 +15,7 @@ import {
   newFamilyPage,
   type FamilyRow,
   type NewFamilyValues,
+  type PendingDevice,
 } from "./admin-pages.ts";
 import { notFoundPage } from "./pages.ts";
 import type { Ctx } from "./auth-routes.ts";
@@ -50,8 +51,13 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
       if (action === "reset-password") return resetPassword(ctx, account);
       if (action === "unlock") return unlock(ctx, account);
       if (action === "status") return setStatus(ctx, account);
+      if (action === "reset-devices") return resetDevices(ctx, account);
+      if (action === "clear-pins") return clearPins(ctx, account);
     }
   }
+
+  const dev = /^\/admin\/devices\/(\d+)\/(approve|remove)$/.exec(path);
+  if (dev && method === "POST") return deviceAction(ctx, Number(dev[1]), dev[2] as "approve" | "remove");
 
   const kid = /^\/admin\/students\/(\d+)\/edit$/.exec(path);
   if (kid && method === "POST") return editStudent(ctx, Number(kid[1]));
@@ -92,6 +98,16 @@ async function dashboard(ctx: Ctx): Promise<Response> {
       students: await count("SELECT COUNT(*) AS n FROM students s JOIN accounts a ON a.id = s.account_id WHERE s.status = 'active' AND a.role = 'parent'"),
       locked: await count("SELECT COUNT(*) AS n FROM accounts WHERE role = 'parent' AND locked_until > ?", ctx.now),
       pending: await count("SELECT COUNT(*) AS n FROM accounts WHERE role = 'parent' AND must_change_password = 1 AND status = 'active'"),
+      devices: (
+        await db
+          .prepare(
+            `SELECT d.id, d.label, d.created_at, d.account_id, a.name, a.phone FROM devices d
+             JOIN accounts a ON a.id = d.account_id
+             WHERE d.status = 'pending' AND a.role = 'parent' AND a.status = 'active'
+             ORDER BY d.created_at DESC LIMIT 50`,
+          )
+          .all<PendingDevice>()
+      ).results,
       recent: recent.results,
     }),
   );
@@ -191,7 +207,26 @@ async function createFamily(ctx: Ctx): Promise<Response> {
 
 // ---------- صفحة العائلة وإجراءاتها ----------
 
-const DONE_KEYS = new Set(["edit", "child", "child-edit", "unlock", "disabled", "enabled"]);
+const DONE_KEYS = new Set([
+  "edit",
+  "child",
+  "child-edit",
+  "unlock",
+  "disabled",
+  "enabled",
+  "device-approved",
+  "device-removed",
+  "devices-reset",
+  "pins-cleared",
+]);
+
+async function loadDevices(ctx: Ctx, accountId: number): Promise<Device[]> {
+  const r = await ctx.env.DB
+    .prepare("SELECT * FROM devices WHERE account_id = ? AND status != 'revoked' ORDER BY status DESC, id")
+    .bind(accountId)
+    .all<Device>();
+  return r.results;
+}
 
 async function showFamily(ctx: Ctx, account: Account): Promise<Response> {
   const done = ctx.url.searchParams.get("done");
@@ -199,6 +234,7 @@ async function showFamily(ctx: Ctx, account: Account): Promise<Response> {
     familyPage(ctx.view, {
       account,
       students: await loadStudents(ctx, account.id),
+      devices: await loadDevices(ctx, account.id),
       now: ctx.now,
       done: done && DONE_KEYS.has(done) ? done : null,
     }),
@@ -216,7 +252,7 @@ async function editFamily(ctx: Ctx, account: Account): Promise<Response> {
     errors.phone = "هذا الرقم مسجل لحساب آخر.";
   }
   if (Object.keys(errors).length || !phone) {
-    return page(familyPage(ctx.view, { account, students: await loadStudents(ctx, account.id), now: ctx.now, errors, values }), 400);
+    return page(familyPage(ctx.view, { account, students: await loadStudents(ctx, account.id), devices: await loadDevices(ctx, account.id), now: ctx.now, errors, values }), 400);
   }
   await ctx.env.DB
     .prepare("UPDATE accounts SET name = ?, phone = ?, note = ?, updated_at = ? WHERE id = ?")
@@ -233,7 +269,7 @@ async function addChild(ctx: Ctx, account: Account): Promise<Response> {
   if (!validName(values.child_name)) errors.child_name = "اكتب اسم الابن.";
   if (!validLevel(values.child_level)) errors.child_level = "اختر المستوى.";
   if (Object.keys(errors).length) {
-    return page(familyPage(ctx.view, { account, students: await loadStudents(ctx, account.id), now: ctx.now, errors, values }), 400);
+    return page(familyPage(ctx.view, { account, students: await loadStudents(ctx, account.id), devices: await loadDevices(ctx, account.id), now: ctx.now, errors, values }), 400);
   }
   await ctx.env.DB
     .prepare("INSERT INTO students (account_id, name, level, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
@@ -290,4 +326,49 @@ async function setStatus(ctx: Ctx, account: Account): Promise<Response> {
   if (status === "disabled") await endOtherSessions(ctx.env.DB, account.id, null);
   await audit(ctx.env.DB, adminId(ctx), status === "disabled" ? "family.disabled" : "family.enabled", `account:${account.id}`);
   return redirect(`/admin/families/${account.id}?done=${status === "disabled" ? "disabled" : "enabled"}`);
+}
+
+// ---------- الأجهزة ورموز الملفات ----------
+
+async function deviceAction(ctx: Ctx, deviceId: number, action: "approve" | "remove"): Promise<Response> {
+  const db = ctx.env.DB;
+  const device = await db
+    .prepare("SELECT d.* FROM devices d JOIN accounts a ON a.id = d.account_id WHERE d.id = ? AND a.role = 'parent'")
+    .bind(deviceId)
+    .first<Device>();
+  if (!device) return page(notFoundPage(ctx.view), 404);
+  const form = await readForm(ctx.request);
+  const back = field(form, "back") === "dashboard" ? "/admin" : `/admin/families/${device.account_id}`;
+  if (action === "approve") {
+    await db.prepare("UPDATE devices SET status = 'approved' WHERE id = ?").bind(deviceId).run();
+    await audit(db, adminId(ctx), "device.approved", `account:${device.account_id}`, device.label);
+    return redirect(back === "/admin" ? back : `${back}?done=device-approved`);
+  }
+  // الإزالة تحذف الجهاز وكل جلساته: من يستعمله يخرج فورًا، وإن دخل منه لاحقًا ينتظر الموافقة من جديد
+  await db.batch([
+    db.prepare("DELETE FROM sessions WHERE device_id = ?").bind(deviceId),
+    db.prepare("DELETE FROM devices WHERE id = ?").bind(deviceId),
+  ]);
+  await audit(db, adminId(ctx), "device.removed", `account:${device.account_id}`, device.label);
+  return redirect(back === "/admin" ? back : `${back}?done=device-removed`);
+}
+
+async function resetDevices(ctx: Ctx, account: Account): Promise<Response> {
+  const db = ctx.env.DB;
+  await db.batch([
+    db.prepare("DELETE FROM sessions WHERE account_id = ?").bind(account.id),
+    db.prepare("DELETE FROM devices WHERE account_id = ?").bind(account.id),
+  ]);
+  await audit(db, adminId(ctx), "devices.reset", `account:${account.id}`);
+  return redirect(`/admin/families/${account.id}?done=devices-reset`);
+}
+
+async function clearPins(ctx: Ctx, account: Account): Promise<Response> {
+  const db = ctx.env.DB;
+  await db.batch([
+    db.prepare("UPDATE accounts SET parent_pin_hash = NULL, parent_pin_failed = 0, parent_pin_locked_until = NULL WHERE id = ?").bind(account.id),
+    db.prepare("UPDATE students SET pin_hash = NULL, pin_failed = 0, pin_locked_until = NULL WHERE account_id = ?").bind(account.id),
+  ]);
+  await audit(db, adminId(ctx), "pins.cleared", `account:${account.id}`);
+  return redirect(`/admin/families/${account.id}?done=pins-cleared`);
 }

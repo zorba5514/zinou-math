@@ -7,9 +7,11 @@ import { homePage, itemPage, levelsPage, notFoundPage, programPage, subscribePag
 import { currentSession } from "./auth.ts";
 import { handleAuthRoutes, type Ctx } from "./auth-routes.ts";
 import { handleAdminRoutes } from "./admin-routes.ts";
+import { handleFamilyRoutes } from "./family-routes.ts";
 import { messagePage } from "./auth-pages.ts";
 import { SECURITY_HEADERS, isSameOrigin, json, page, redirect, type Env } from "./http.ts";
-import type { View } from "./ui.ts";
+import type { View, Viewer } from "./ui.ts";
+import type { Student } from "./db.ts";
 
 export { PAGE_CSP, SECURITY_HEADERS, json, page, type Env } from "./http.ts";
 
@@ -23,6 +25,8 @@ export const SPECULATION_RULES = {
           // لا تحميل مسبق لصفحات الحساب ولوحة التحكم: يجب أن تُطلب فعلًا لتعكس آخر حالة
           { not: { href_matches: "/admin*" } },
           { not: { href_matches: "/account*" } },
+          { not: { href_matches: "/profiles*" } },
+          { not: { href_matches: "/home" } },
           { not: { href_matches: "/login*" } },
           { not: { href_matches: "/setup" } },
         ],
@@ -92,10 +96,20 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const now = Date.now();
   const current = await currentSession(env.DB, request, now);
   const user = current?.session.stage === "full" ? current : null;
-  const view: View = {
-    env: env.APP_ENV,
-    viewer: user ? { name: user.account.name, role: user.account.role } : null,
-  };
+  let viewer: Viewer | null = null;
+  if (user) {
+    viewer = { name: user.account.name, role: user.account.role, profile: null };
+    if (user.account.role === "parent" && user.session.profile_kind === "parent") viewer.profile = "parent";
+    if (user.account.role === "parent" && user.session.profile_kind === "student" && user.session.student_id !== null) {
+      // اسم الابن يظهر في القائمة؛ ابن موقوف أو محذوف يعني أن الملف لم يعد صالحًا
+      const student = await env.DB
+        .prepare("SELECT * FROM students WHERE id = ? AND account_id = ? AND status = 'active'")
+        .bind(user.session.student_id, user.account.id)
+        .first<Student>();
+      if (student) viewer = { ...viewer, name: student.name, profile: "student" };
+    }
+  }
+  const view: View = { env: env.APP_ENV, viewer };
 
   if (method === "POST" && !isSameOrigin(request)) {
     return page(messagePage(view, "طلب مرفوض", "أُرسل هذا النموذج من خارج الموقع، فرُفض حمايةً لحسابك.", "error"), 403);
@@ -103,12 +117,18 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
 
   const ctx: Ctx = { request, env, url, path, method, now, current, user, view };
 
+  const accountArea =
+    path.startsWith("/admin") || path === "/account" || path.startsWith("/account/") || path === "/home" || path === "/profiles" || path.startsWith("/profiles/");
   // من يدخل بكلمة مرور مؤقتة يجب أن يغيّرها قبل أي شيء آخر في حسابه
-  if (user?.account.must_change_password && (path.startsWith("/admin") || path === "/account")) {
+  if (user?.account.must_change_password && accountArea && path !== "/account/password") {
     return redirect("/account/password");
   }
+  // كلمة مرور العائلة يغيّرها الولي فقط، لا من ملف أحد الأبناء
+  if (user?.account.role === "parent" && viewer?.profile === "student" && path === "/account/password") {
+    return redirect("/home");
+  }
 
-  const routed = (await handleAuthRoutes(ctx)) ?? (await handleAdminRoutes(ctx));
+  const routed = (await handleAuthRoutes(ctx)) ?? (await handleAdminRoutes(ctx)) ?? (await handleFamilyRoutes(ctx));
   if (routed) return routed;
 
   if (method === "POST") return page(notFoundPage(view), 404);

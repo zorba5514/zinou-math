@@ -2,10 +2,9 @@
 
 import { html, Raw } from "./html.ts";
 import { icon } from "./icons.ts";
-import { alertBox, input, layout, logoutForm, phoneExample, type View } from "./ui.ts";
-import { findProgram } from "./catalog.ts";
+import { alertBox, input, layout, phoneExample, type View } from "./ui.ts";
 import { formatPhone } from "./phone.ts";
-import type { Account, Student } from "./db.ts";
+import type { Account } from "./db.ts";
 
 function authCard(title: string, lead: string, ic: Parameters<typeof icon>[0], body: Raw): Raw {
   return html`<section class="card auth-card">
@@ -83,36 +82,22 @@ export function passwordPage(
   });
 }
 
-export function accountPage(view: View, account: Account, students: Student[]): string {
+export function deviceWaitPage(view: View, account: Account): string {
   return layout({
-    title: "حسابي",
+    title: "جهاز جديد",
     view,
-    current: "account",
-    body: html`<section class="card hero">
-  <span class="badge-pill"><span class="dot"></span>مرحبًا بعودتك</span>
-  <h1>${account.name}</h1>
-  <p class="muted hero-text">حساب العائلة: <bdi dir="ltr">${formatPhone(account.phone)}</bdi></p>
-  <div class="actions">
-    <a class="btn btn-secondary" href="/account/password">${icon("key")}تغيير كلمة المرور</a>
-    ${logoutForm()}
-  </div>
-</section>
-<section class="section" aria-labelledby="kids-title">
-  <h2 id="kids-title">الأبناء</h2>
-  ${
-    students.length
-      ? html`<ul class="card-grid">${students.map((s) => {
-          const program = findProgram(s.level);
-          return html`<li class="card program-card">
-      <span class="icon-box">${icon("user")}</span>
-      <span class="program-title">${s.name}</span>
-      <span class="program-meta">${program?.title ?? s.level}</span>
-      ${program ? html`<a class="btn btn-secondary btn-sm btn-block" href="/levels/${program.slug}">الدروس ${icon("arrowLeft")}</a>` : ""}
-    </li>`;
-        })}</ul>`
-      : html`<div class="card empty"><p>لم يُضف أي ابن إلى هذا الحساب بعد. تواصل مع الأستاذ لإضافته.</p></div>`
-  }
-</section>`,
+    current: "login",
+    body: authCard(
+      "جهاز جديد بانتظار الموافقة",
+      "هذا الجهاز لم يُستعمل من قبل مع حساب العائلة. حمايةً للحساب، يجب أن يوافق الأستاذ عليه أولًا.",
+      "phone",
+      html`<ol class="mini-steps wait-steps">
+    <li>تواصل مع الأستاذ واطلب منه الموافقة على الجهاز الجديد لحساب <bdi dir="ltr">${formatPhone(account.phone)}</bdi>.</li>
+    <li>بعد موافقته اضغط «تحقق الآن» فتدخل مباشرة، دون إعادة كتابة كلمة المرور.</li>
+  </ol>
+  <a class="btn btn-primary btn-block" href="/login/device">تحقق الآن ${icon("arrowLeft")}</a>
+  <form method="post" action="/logout" class="auth-note"><button class="btn-link" type="submit">إلغاء</button></form>`,
+    ),
   });
 }
 

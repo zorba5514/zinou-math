@@ -451,8 +451,8 @@ select.input { appearance: none; padding-inline-end: 44px; background-image: url
 .drawer-user { margin-top: auto; display: grid; gap: 8px; }
 .drawer-user .drawer-card { margin-top: 0; }
 .drawer-avatar { font-weight: 800; font-size: 20px; }
-.drawer-logout { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; background: transparent; color: var(--drawer-muted); border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px; font: inherit; cursor: pointer; }
-.drawer-logout:hover { color: var(--drawer-ink); background: rgba(255, 255, 255, .05); }
+.drawer-logout, .drawer-switch { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; background: transparent; color: var(--drawer-muted); border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px; font: inherit; cursor: pointer; }
+.drawer-logout:hover, .drawer-switch:hover { color: var(--drawer-ink); background: rgba(255, 255, 255, .05); }
 
 @media (min-width: 720px) {
   .hero { padding: 36px 36px 42px; }
@@ -465,3 +465,49 @@ select.input { appearance: none; padding-inline-end: 44px; background-image: url
     animation: none !important; transition: none !important;
   }
 }
+
+/* ---------- المرحلة 3: الملفات والأجهزة ---------- */
+.drawer-switch { text-decoration: none; }
+.drawer-switch .icon { width: 18px; height: 18px; }
+
+.page-head-center { text-align: center; }
+.profiles { list-style: none; margin: 20px auto 24px; padding: 0; max-width: 720px; display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 720px) { .profiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.profile-form { margin: 0; height: 100%; }
+.profile-card {
+  position: relative; width: 100%; height: 100%; min-height: 168px; padding: 20px 12px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  border: 2px solid transparent; font: inherit; color: var(--ink); cursor: pointer; text-align: center;
+  transition: transform 150ms ease-out, border-color 150ms ease-out;
+}
+.profile-card:hover { transform: translateY(-2px); border-color: var(--brand); }
+.profile-card:focus-visible { outline: 3px solid var(--brand-strong); outline-offset: 2px; }
+.profile-avatar { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 20px; background: var(--brand); color: #16181D; font-size: 28px; font-weight: 800; margin-bottom: 4px; }
+/* ألوان ثابتة في الوضعين: الأصفر لا يوضع أبدًا على خلفية فاتحة */
+.profile-avatar-parent { background: #16181D; color: #FBBF24; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .14); }
+.profile-avatar-parent .icon { width: 30px; height: 30px; }
+.profile-avatar-sm { width: 48px; height: 48px; border-radius: 16px; font-size: 22px; margin-bottom: 8px; }
+.profile-name { font-weight: 800; font-size: 17px; line-height: 1.35; }
+.profile-meta { font-size: 14px; color: var(--label); }
+.profile-lock { position: absolute; top: 12px; inset-inline-end: 12px; color: var(--label); }
+.program-card .profile-form { margin-top: 12px; height: auto; }
+
+.device-list { list-style: none; margin: 0; padding: 4px 18px; }
+.device-list li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.device-list li:last-child { border-bottom: 0; }
+.device-list-plain { padding: 0; margin-bottom: 14px; }
+.device-main { flex: 1; min-width: 10em; display: flex; flex-direction: column; line-height: 1.45; }
+.device-main small { color: var(--label); font-size: 14px; }
+.device-main a { color: inherit; }
+.device-actions { display: flex; gap: 8px; }
+.device-actions form { margin: 0; }
+
+.wait-steps li + li { margin-top: 4px; }
+
+.pin-grid { display: grid; gap: 16px; margin-top: 16px; }
+@media (min-width: 820px) { .pin-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; } }
+.pin-grid h2 { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.pin-pair { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-card .pin-pair .field + .field { margin-top: 0; }
+.pin-pair .input { letter-spacing: .4em; text-align: center; }
+.pin-remove { margin-top: 6px; }

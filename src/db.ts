@@ -31,6 +31,9 @@ export interface Account {
   locked_until: number | null;
   totp_secret: string | null;
   note: string | null;
+  parent_pin_hash: string | null;
+  parent_pin_failed: number;
+  parent_pin_locked_until: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -41,8 +44,21 @@ export interface Student {
   name: string;
   level: string;
   status: "active" | "disabled";
+  pin_hash: string | null;
+  pin_failed: number;
+  pin_locked_until: number | null;
   created_at: number;
   updated_at: number;
+}
+
+export interface Device {
+  id: number;
+  account_id: number;
+  token_hash: string;
+  label: string | null;
+  status: "pending" | "approved" | "revoked";
+  created_at: number;
+  last_used_at: number | null;
 }
 
 export async function audit(

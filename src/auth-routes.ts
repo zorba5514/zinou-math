@@ -1,12 +1,14 @@
 // مسارات الدخول والحساب.
 
-import { audit, type Account, type Student } from "./db.ts";
+import { audit, type Account } from "./db.ts";
 import {
   attemptLogin,
   checkSecondFactor,
   createSession,
+  deviceStatus,
   endOtherSessions,
   endSession,
+  familyDeviceGate,
   passwordIterations,
   registerFailure,
   trustDevice,
@@ -28,7 +30,7 @@ import { SESSION_COOKIE, clearCookie, field, page, readForm, redirect, safeNext,
 import { normalizePhone } from "./phone.ts";
 import { qrSvg } from "./qr.ts";
 import {
-  accountPage,
+  deviceWaitPage,
   loginPage,
   passwordPage,
   setupDonePage,
@@ -55,15 +57,16 @@ export interface Ctx {
 
 export function homeFor(account: Account): string {
   if (account.must_change_password) return "/account/password";
-  return account.role === "admin" ? "/admin" : "/account";
+  // العائلة تختار الملف (الولي أو أحد الأبناء) بعد كل دخول
+  return account.role === "admin" ? "/admin" : "/profiles";
 }
 
 export async function handleAuthRoutes(ctx: Ctx): Promise<Response | null> {
   const { path, method } = ctx;
   if (path === "/login") return method === "POST" ? postLogin(ctx) : getLogin(ctx);
   if (path === "/login/verify") return method === "POST" ? postVerify(ctx) : getVerify(ctx);
+  if (path === "/login/device" && method === "GET") return getDeviceWait(ctx);
   if (path === "/logout" && method === "POST") return postLogout(ctx);
-  if (path === "/account") return getAccount(ctx);
   if (path === "/account/password") return method === "POST" ? postPassword(ctx) : getPassword(ctx);
   if (path === "/setup") return method === "POST" ? postSetup(ctx) : getSetup(ctx);
   return null;
@@ -85,18 +88,41 @@ async function postLogin(ctx: Ctx): Promise<Response> {
   if (!result.ok) return page(loginPage(ctx.view, { phone, error: result.message, next }), 400);
 
   // جلسة جديدة دائمًا عند الدخول، وتُلغى أي جلسة سابقة على هذا المتصفح
-  await endSession(ctx.env.DB, ctx.request);
-  if (result.needsMfa) {
-    const { cookie } = await createSession(ctx.env.DB, result.account, "mfa", ctx.now);
-    return redirect("/login/verify", [cookie]);
+  const db = ctx.env.DB;
+  await endSession(db, ctx.request);
+  const { account } = result;
+  if (account.role === "admin") {
+    if (result.needsMfa) {
+      const { cookie } = await createSession(db, account, "mfa", ctx.now);
+      return redirect("/login/verify", [cookie]);
+    }
+    const { cookie } = await createSession(db, account, "full", ctx.now, result.trustedDeviceId);
+    return redirect(next.startsWith("/admin") ? next : homeFor(account), [cookie]);
   }
-  const { cookie } = await createSession(ctx.env.DB, result.account, "full", ctx.now);
-  const target = result.account.must_change_password
-    ? "/account/password"
-    : result.account.role === "parent" && next && !next.startsWith("/admin")
-      ? next
-      : homeFor(result.account);
-  return redirect(target, [cookie]);
+
+  // العائلة: أول جهاز يُعتمد تلقائيًا، وأي جهاز آخر ينتظر موافقة الأستاذ
+  const gate = await familyDeviceGate(db, ctx.request, account, ctx.now);
+  const cookies = gate.cookie ? [gate.cookie] : [];
+  if (gate.status === "pending") {
+    cookies.push((await createSession(db, account, "device", ctx.now, gate.deviceId)).cookie);
+    return redirect("/login/device", cookies);
+  }
+  cookies.push((await createSession(db, account, "full", ctx.now, gate.deviceId)).cookie);
+  return redirect(homeFor(account), cookies);
+}
+
+async function getDeviceWait(ctx: Ctx): Promise<Response> {
+  if (ctx.user) return redirect(homeFor(ctx.user.account));
+  if (!ctx.current || ctx.current.session.stage !== "device") return redirect("/login");
+  const db = ctx.env.DB;
+  const status = await deviceStatus(db, ctx.current.session.device_id);
+  if (status === "approved") {
+    // وافق الأستاذ: تتحول الجلسة إلى جلسة كاملة على هذا الجهاز
+    await endSession(db, ctx.request);
+    const { cookie } = await createSession(db, ctx.current.account, "full", ctx.now, ctx.current.session.device_id);
+    return redirect(homeFor(ctx.current.account), [cookie]);
+  }
+  return page(deviceWaitPage(ctx.view, ctx.current.account));
 }
 
 function getVerify(ctx: Ctx): Response {
@@ -128,8 +154,14 @@ async function postVerify(ctx: Ctx): Promise<Response> {
   }
   await db.prepare("UPDATE accounts SET failed_attempts = 0, locked_until = NULL WHERE id = ?").bind(fresh.id).run();
   await endSession(db, ctx.request);
-  const cookies = [(await createSession(db, fresh, "full", ctx.now)).cookie];
-  if (form.get("remember") === "1") cookies.push(await trustDevice(db, ctx.request, fresh.id, ctx.now));
+  const cookies: string[] = [];
+  let deviceId: number | null = null;
+  if (form.get("remember") === "1") {
+    const trusted = await trustDevice(db, ctx.request, fresh.id, ctx.now);
+    deviceId = trusted.deviceId;
+    if (trusted.cookie) cookies.push(trusted.cookie);
+  }
+  cookies.push((await createSession(db, fresh, "full", ctx.now, deviceId)).cookie);
   return redirect(homeFor(fresh), cookies);
 }
 
@@ -139,19 +171,7 @@ async function postLogout(ctx: Ctx): Promise<Response> {
   return redirect("/", [clearCookie(SESSION_COOKIE)]);
 }
 
-// ---------- الحساب ----------
-
-async function getAccount(ctx: Ctx): Promise<Response> {
-  if (!ctx.user) return redirect(`/login?next=${encodeURIComponent("/account")}`);
-  const { account } = ctx.user;
-  if (account.must_change_password) return redirect("/account/password");
-  if (account.role === "admin") return redirect("/admin");
-  const students = await ctx.env.DB
-    .prepare("SELECT * FROM students WHERE account_id = ? AND status = 'active' ORDER BY id")
-    .bind(account.id)
-    .all<Student>();
-  return page(accountPage(ctx.view, account, students.results));
-}
+// ---------- كلمة المرور ----------
 
 function getPassword(ctx: Ctx): Response {
   if (!ctx.user) return redirect(`/login?next=${encodeURIComponent("/account/password")}`);
@@ -186,7 +206,7 @@ async function postPassword(ctx: Ctx): Promise<Response> {
   // من كان يعرف كلمة المرور القديمة يخرج من كل الأجهزة الأخرى
   await endOtherSessions(ctx.env.DB, account.id, session.id);
   await audit(ctx.env.DB, account.id, "password.changed", `account:${account.id}`, forced ? "أول دخول" : null);
-  if (forced) return redirect(account.role === "admin" ? "/admin" : "/account");
+  if (forced) return redirect(homeFor({ ...account, must_change_password: 0 }));
   return page(passwordPage(ctx.view, { forced: false, success: true }));
 }
 
@@ -274,6 +294,8 @@ async function postSetup(ctx: Ctx): Promise<Response> {
 
   const account = await db.prepare("SELECT * FROM accounts WHERE id = ?").bind(adminId).first<Account>();
   if (!account) return page(notFoundPage(ctx.view), 500);
-  const cookies = [(await createSession(db, account, "full", ctx.now)).cookie, await trustDevice(db, ctx.request, adminId, ctx.now)];
+  const trusted = await trustDevice(db, ctx.request, adminId, ctx.now);
+  const cookies = [(await createSession(db, account, "full", ctx.now, trusted.deviceId)).cookie];
+  if (trusted.cookie) cookies.push(trusted.cookie);
   return page(setupDonePage({ ...ctx.view, viewer: { name: account.name, role: "admin" } }, codes), 200, cookies);
 }
