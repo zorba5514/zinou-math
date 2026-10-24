@@ -3,6 +3,7 @@
 // قائمة جانبية داكنة، والأصفر للعناصر المهمة فقط.
 
 import { html, type Raw } from "./html.ts";
+import { layout, ZIGZAG, SITE_NAME, SLOGAN, type View } from "./ui.ts";
 import { icon, type IconName } from "./icons.ts";
 import { describe, formula, intercept, linePath, toY, SIZE, UNIT } from "../public/graph.js";
 import {
@@ -14,87 +15,7 @@ import {
   type Unit,
 } from "./catalog.ts";
 
-export const SITE_NAME = "الأستاذ زين الدين للرياضيات";
-export const SLOGAN = "الرياضيات كما يجب أن تكون";
-
-type Nav = "home" | "levels" | "subscribe" | null;
-
-function navItem(href: string, label: string, ic: IconName, key: Nav, current: Nav): Raw {
-  return key === current
-    ? html`<a class="nav-item" href="${href}" aria-current="page">${icon(ic)}<span>${label}</span></a>`
-    : html`<a class="nav-item" href="${href}">${icon(ic)}<span>${label}</span></a>`;
-}
-
-/** الخط المتعرج أسفل الشعار، فاصل زخرفي رفيع. */
-const ZIGZAG = html`<svg class="zigzag" viewBox="0 0 120 12" preserveAspectRatio="none" aria-hidden="true"><path d="M0 9h14l12-6 14 7 14-7 14 6h52" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/></svg>`;
-
-export function layout(opts: {
-  title: string;
-  env: string;
-  current: Nav;
-  body: Raw;
-  description?: string;
-  scripts?: boolean;
-}): string {
-  const fullTitle = opts.title === SITE_NAME ? SITE_NAME : `${opts.title} | ${SITE_NAME}`;
-  const staging = opts.env !== "production";
-  const description =
-    opts.description ?? `${SITE_NAME}: ${SLOGAN}. دروس رياضيات من الأولى متوسط إلى الأولى ثانوي.`;
-  return html`<!doctype html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${fullTitle}</title>
-<meta name="description" content="${description}">
-${staging ? html`<meta name="robots" content="noindex">` : ""}
-<meta name="theme-color" content="#16181D">
-<meta name="color-scheme" content="light dark">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
-<link rel="preload" href="/fonts/tajawal-ar-400.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/fonts/tajawal-ar-800.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/styles.css">
-${opts.scripts ? html`<script type="module" src="/app.js"></script>` : ""}
-</head>
-<body>
-<a class="skip" href="#main">تخطَّ إلى المحتوى</a>
-${staging ? html`<p class="staging">نسخة الاختبار: المحتوى المعروض تجريبي.</p>` : ""}
-<div class="shell">
-  <aside id="drawer" class="drawer" popover aria-label="القائمة">
-    <button class="drawer-close" type="button" popovertarget="drawer" popovertargetaction="hide" aria-label="إغلاق القائمة">${icon("x")}</button>
-    <a class="drawer-brand" href="/">
-      <img src="/brand/logo.svg" alt="" width="72" height="64">
-      <strong>${SITE_NAME}</strong>
-      <span>${SLOGAN}</span>
-    </a>
-    <p class="drawer-label">القائمة الرئيسية</p>
-    <nav class="drawer-nav" aria-label="القائمة الرئيسية">
-      ${navItem("/", "الرئيسية", "home", "home", opts.current)}
-      ${navItem("/levels", "الدروس", "book", "levels", opts.current)}
-      ${navItem("/subscribe", "الاشتراك", "card", "subscribe", opts.current)}
-    </nav>
-    <a class="drawer-card" href="/subscribe">
-      <span class="drawer-card-icon">${icon("chat")}</span>
-      <span><strong>اشترك مع الأستاذ</strong><small>يفعّل حساب العائلة بعد الدفع</small></span>
-    </a>
-  </aside>
-  <div class="main-col">
-    <header class="topbar">
-      <button class="menu-btn" type="button" popovertarget="drawer" aria-label="فتح القائمة">${icon("menu")}</button>
-      <a class="topbar-brand" href="/"><img src="/brand/logo.svg" alt="" width="40" height="40"><span>${SITE_NAME}</span></a>
-    </header>
-    <main id="main" class="content">
-${opts.body}
-    </main>
-    <footer class="site-footer">
-      <p>${SITE_NAME}. ${SLOGAN}.</p>
-    </footer>
-  </div>
-</div>
-</body>
-</html>`.value;
-}
+export { SITE_NAME, SLOGAN } from "./ui.ts";
 
 function programCard(program: Program): Raw {
   const { free, total } = countItems(program);
@@ -173,12 +94,12 @@ function steps(items: [string, string, IconName][]): Raw {
   )}</ol>`;
 }
 
-export function homePage(env: string): string {
+export function homePage(view: View): string {
   return layout({
     title: SITE_NAME,
-    env,
+    view,
     current: "home",
-    scripts: true,
+    scripts: ["/app.js"],
     body: html`<section class="card hero">
   <span class="badge-pill"><span class="dot"></span>دروس الرياضيات من 1 متوسط إلى 1 ثانوي</span>
   <h1>${SITE_NAME}</h1>
@@ -203,10 +124,10 @@ ${programGrids()}
   });
 }
 
-export function levelsPage(env: string): string {
+export function levelsPage(view: View): string {
   return layout({
     title: "الدروس",
-    env,
+    view,
     current: "levels",
     body: html`<header class="page-head">
   <h1>الدروس</h1>
@@ -249,12 +170,12 @@ function unitBlock(unit: Unit, index: number): Raw {
     : html`<details class="card unit">${summary}</details>`;
 }
 
-export function programPage(env: string, program: Program): string {
+export function programPage(view: View, program: Program): string {
   const { free, total } = countItems(program);
   const parts = program.kind === "level" ? "مقاطع" : "أجزاء";
   return layout({
     title: program.title,
-    env,
+    view,
     current: "levels",
     body: html`<nav class="crumbs" aria-label="مسار التصفح"><a href="/levels">الدروس</a><span aria-hidden="true">/</span><span aria-current="page">${program.title}</span></nav>
 <section class="card hero hero-compact">
@@ -271,10 +192,10 @@ export function programPage(env: string, program: Program): string {
   });
 }
 
-export function itemPage(env: string, program: Program, unit: Unit, item: Item): string {
+export function itemPage(view: View, program: Program, unit: Unit, item: Item): string {
   return layout({
     title: item.title,
-    env,
+    view,
     current: "levels",
     body: html`<nav class="crumbs" aria-label="مسار التصفح"><a href="/levels">الدروس</a><span aria-hidden="true">/</span><a href="/levels/${program.slug}">${program.title}</a><span aria-hidden="true">/</span><span aria-current="page">${unit.title}</span></nav>
 <section class="card hero hero-compact">
@@ -287,10 +208,10 @@ export function itemPage(env: string, program: Program, unit: Unit, item: Item):
   });
 }
 
-export function subscribePage(env: string, locked?: { program: Program; item: Item }): string {
+export function subscribePage(view: View, locked?: { program: Program; item: Item }): string {
   return layout({
     title: "الاشتراك",
-    env,
+    view,
     current: "subscribe",
     body: html`<header class="page-head">
   <h1>الاشتراك</h1>
@@ -321,10 +242,10 @@ ${
   });
 }
 
-export function notFoundPage(env: string): string {
+export function notFoundPage(view: View): string {
   return layout({
     title: "الصفحة غير موجودة",
-    env,
+    view,
     current: null,
     body: html`<section class="card hero hero-compact">
   <h1>الصفحة غير موجودة</h1>

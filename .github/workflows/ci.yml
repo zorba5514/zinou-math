@@ -55,6 +55,34 @@ jobs:
       - run: npm install --no-audit --no-fund
       - name: تجهيز الخطوط
         run: npm run fonts
+      - name: تجهيز قاعدة البيانات
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -o pipefail
+          node scripts/ensure-d1.mjs zinou-math-staging
+          # تطبيق الجداول الجديدة فقط (ما طُبّق سابقًا لا يُعاد)
+          if ! npx wrangler d1 migrations apply DB --env staging --remote 2>&1 | tee migrate.log; then
+            msg=$(tail -20 migrate.log | sed -e 's/%/%25/g' -e 's/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g')
+            echo "::error title=فشل تطبيق الجداول::$msg"
+            exit 1
+          fi
+          if grep -qiE "aborted|cancel" migrate.log; then
+            echo "::error title=فشل تطبيق الجداول::أُلغي التطبيق"
+            exit 1
+          fi
+      - name: رمز التأسيس
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ADMIN_SETUP_CODE: ${{ secrets.ADMIN_SETUP_CODE }}
+        run: |
+          if [ -z "$ADMIN_SETUP_CODE" ]; then
+            echo "::warning title=رمز التأسيس::السر ADMIN_SETUP_CODE غير موجود في GitHub. صفحة تأسيس حساب الأستاذ لن تعمل حتى يُضاف."
+            exit 0
+          fi
+          printf '%s' "$ADMIN_SETUP_CODE" | npx wrangler secret put ADMIN_SETUP_CODE --env staging
       - name: النشر
         id: deploy
         env:
@@ -86,10 +114,13 @@ jobs:
             page=$(cat page.html 2>/dev/null || true)
             if echo "$health" | grep -q '"status":"ok"' \
               && echo "$health" | grep -q '"environment":"staging"' \
+              && echo "$health" | grep -q '"database":"ok"' \
               && echo "$page" | grep -q '<html lang="ar" dir="rtl">' \
               && curl -fsS -o /dev/null "$URL/fonts/tajawal-ar-400.woff2" \
               && curl -fsS -o /dev/null "$URL/fonts/tajawal-ar-800.woff2" \
-              && curl -fsS -o /dev/null "$URL/app.js"; then
+              && curl -fsS -o /dev/null "$URL/app.js" \
+              && curl -fsS -o login.html "$URL/login" && grep -q 'name="password"' login.html \
+              && [ "$(curl -sS -o /dev/null -w '%{http_code}' "$URL/admin")" = "303" ]; then
               echo "موقع الاختبار يعمل: $URL"
               echo "### موقع الاختبار يعمل" >> "$GITHUB_STEP_SUMMARY"
               echo "$URL" >> "$GITHUB_STEP_SUMMARY"

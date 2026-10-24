@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handleRequest, PAGE_CSP, SECURITY_HEADERS, type Env } from "../src/index.ts";
+import { createTestDb } from "./helpers/d1.ts";
 
 // بيئة وهمية: ASSETS تعرف ملفًا واحدًا فقط (/styles.css) وترد 404 لغيره.
-function fakeEnv(appEnv = "test"): Env & { assetCalls: string[] } {
+function fakeEnv(appEnv = "test"): Env & { assetCalls: string[]; DB: ReturnType<typeof createTestDb> } {
   const assetCalls: string[] = [];
   return {
     APP_ENV: appEnv,
+    DB: createTestDb(),
     assetCalls,
     ASSETS: {
       async fetch(request: Request) {
@@ -28,7 +30,7 @@ test("فحص الصحة يرد بحالة سليمة واسم البيئة", asy
   const res = await get("/api/health");
   assert.equal(res.status, 200);
   assert.match(res.headers.get("Content-Type") ?? "", /application\/json/);
-  assert.deepEqual(await res.json(), { status: "ok", environment: "test" });
+  assert.deepEqual(await res.json(), { status: "ok", environment: "test", database: "ok" });
 });
 
 test("فحص الصحة يرفض الطرق غير GET", async () => {
@@ -96,9 +98,13 @@ test("الملفات الثابتة الموجودة تُقدَّم كما هي"
   assert.equal(await res.text(), "css");
 });
 
-test("الصفحات ترفض الطرق غير GET وHEAD", async () => {
-  const res = await get("/levels", fakeEnv(), { method: "POST" });
-  assert.equal(res.status, 405);
+test("الطرق غير المدعومة تُرفض، والنماذج من خارج الموقع تُرفض", async () => {
+  assert.equal((await get("/levels", fakeEnv(), { method: "DELETE" })).status, 405);
+  // نموذج بلا ترويسة Origin أو من موقع آخر: مرفوض
+  assert.equal((await get("/levels", fakeEnv(), { method: "POST" })).status, 403);
+  assert.equal((await get("/logout", fakeEnv(), { method: "POST", headers: { Origin: "https://evil.example" } })).status, 403);
+  // نموذج من نفس الموقع إلى صفحة لا تقبل النماذج: غير موجودة
+  assert.equal((await get("/levels", fakeEnv(), { method: "POST", headers: { Origin: base } })).status, 404);
 });
 
 test("شريط نسخة الاختبار يظهر في موقع الاختبار فقط", async () => {
@@ -116,4 +122,12 @@ test("قواعد التحميل المسبق تُقدَّم بالنوع الص�
   assert.ok(Array.isArray((await rules.json()).prerender));
   const res = await get("/levels");
   assert.equal(res.headers.get("Speculation-Rules"), '"/speculation-rules.json"');
+});
+
+test("فحص الصحة يكشف قاعدة بيانات بلا جداول", async () => {
+  const env = fakeEnv();
+  env.DB.raw.exec("DROP TABLE recovery_codes; DROP TABLE devices; DROP TABLE sessions; DROP TABLE students; DROP TABLE accounts;");
+  const res = await get("/api/health", env);
+  assert.equal(res.status, 503);
+  assert.equal((await res.json()).database, "error");
 });

@@ -11,11 +11,21 @@ binding = "ASSETS"
 
 [vars]
 APP_ENV = "production"
+PASSWORD_ITERATIONS = "100000"
 
-# موقع الاختبار: نسخة منفصلة تمامًا عن الموقع الحقيقي.
+# موقع الاختبار: نسخة منفصلة تمامًا عن الموقع الحقيقي، بقاعدة بيانات خاصة به.
 [env.staging]
 name = "zinou-math-staging"
 workers_dev = true
 
 [env.staging.vars]
 APP_ENV = "staging"
+# تشفير أخف لأن الخطة المجانية تحدد وقت المعالجة. يرتفع إلى 100000 مع الخطة المدفوعة.
+PASSWORD_ITERATIONS = "5000"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "zinou-math-staging"
+# يكتبه scripts/ensure-d1.mjs آليًا أثناء النشر
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

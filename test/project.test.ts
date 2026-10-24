@@ -31,7 +31,7 @@ test("المستقيم يمر بالنقاط الصحيحة في الرسم", ()
 });
 
 test("الصفحة الرئيسية تعرض الشعار واسم المنصة والعبارة", () => {
-  const page = homePage("staging");
+  const page = homePage({ env: "staging", viewer: null });
   assert.match(page, /<html lang="ar" dir="rtl">/);
   assert.match(page, /name="viewport" content="width=device-width, initial-scale=1"/);
   assert.match(page, /src="\/brand\/logo.svg"/);
@@ -40,7 +40,7 @@ test("الصفحة الرئيسية تعرض الشعار واسم المنصة 
 });
 
 test("الصفحات لا تحتوي تنسيقًا أو كودًا مضمّنًا تمنعه سياسة المحتوى", () => {
-  const page = homePage("staging");
+  const page = homePage({ env: "staging", viewer: null });
   for (const tag of page.match(/<script[^>]*>/g) ?? []) {
     assert.match(tag, /src="\/app\.js"/, tag);
   }
@@ -50,7 +50,7 @@ test("الصفحات لا تحتوي تنسيقًا أو كودًا مضمّنً
 });
 
 test("الرسم التفاعلي: الصفحة تُظهر الدالة والمستقيم، والمؤشرات معطّلة حتى يعمل الكود", () => {
-  const page = homePage("staging");
+  const page = homePage({ env: "staging", viewer: null });
   assert.match(page, /data-graph/);
   assert.match(page, /f\(x\) = x \+ 2/);
   assert.match(page, /<div class="controls" data-controls>/);
@@ -114,7 +114,7 @@ test("ملفات الأسرار المحلية مستبعدة من المستو�
 });
 
 test("القائمة الجانبية تعمل دون كود: زر يفتحها وزر يغلقها", () => {
-  const page = homePage("staging");
+  const page = homePage({ env: "staging", viewer: null });
   assert.match(page, /<aside id="drawer" class="drawer" popover/);
   assert.match(page, /popovertarget="drawer" aria-label="فتح القائمة"/);
   assert.match(page, /popovertargetaction="hide"/);
@@ -122,7 +122,7 @@ test("القائمة الجانبية تعمل دون كود: زر يفتحها 
 });
 
 test("الهوية: السداسي في الشعار فقط، والخط المتعرج مرة واحدة", () => {
-  const page = homePage("staging");
+  const page = homePage({ env: "staging", viewer: null });
   assert.doesNotMatch(page, /polygon\(/);
   assert.doesNotMatch(read("public/styles.css"), /polygon\(/);
   assert.equal(page.match(/class="zigzag"/g)?.length, 1);
