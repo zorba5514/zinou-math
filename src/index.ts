@@ -27,6 +27,7 @@ export const SPECULATION_RULES = {
           { not: { href_matches: "/account*" } },
           { not: { href_matches: "/profiles*" } },
           { not: { href_matches: "/home" } },
+          { not: { href_matches: "/files/*" } },
           { not: { href_matches: "/login*" } },
           { not: { href_matches: "/setup" } },
         ],
@@ -85,7 +86,37 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
       .first<Lesson>();
     return page(lessonPage(view, found, next));
   }
+  const fileMatch = /^\/files\/(\d{1,12})$/.exec(path);
+  if (fileMatch) return serveFile(ctx, Number(fileMatch[1]));
   return null;
+}
+
+/** ملف PDF لدرس: نفس قواعد الدرس (منشور، ومن يحق له)، وحسب طريقة الإتاحة التي اختارها الأستاذ. */
+async function serveFile(ctx: Ctx, id: number): Promise<Response> {
+  const { view } = ctx;
+  const isAdmin = view.viewer?.role === "admin";
+  const found = await getLesson(ctx.env.DB, id);
+  if (!found || found.lesson.kind !== "pdf" || !found.lesson.file_key || (!isPublished(found) && !isAdmin)) {
+    return page(notFoundPage(view), 404);
+  }
+  if (!canOpen(view.viewer, found.lesson)) return redirect(`/subscribe?lesson=${id}`, [], 302);
+  const download = ctx.url.searchParams.get("download") === "1";
+  const mode = found.lesson.file_mode ?? "both";
+  if ((download && mode === "view") || (!download && mode === "download")) return page(notFoundPage(view), 404);
+  const object = ctx.env.FILES ? await ctx.env.FILES.get(found.lesson.file_key) : null;
+  if (!object) return page(notFoundPage(view), 404);
+  const name = found.lesson.file_name ?? "file.pdf";
+  return new Response(object.body, {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Length": String(object.size),
+      // اسم الملف بالعربية حسب المعيار RFC 5987، مع اسم احتياطي بالحروف اللاتينية
+      "Content-Disposition": `${download ? "attachment" : "inline"}; filename="lesson-${id}.pdf"; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+    },
+  });
 }
 
 export async function handleRequest(request: Request, env: Env): Promise<Response> {

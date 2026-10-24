@@ -72,6 +72,11 @@ jobs:
             echo "::error title=فشل تطبيق الجداول::أُلغي التطبيق"
             exit 1
           fi
+      - name: تجهيز مخزن الملفات
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/ensure-r2.mjs zinou-math-staging-files
       - name: رمز التأسيس
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

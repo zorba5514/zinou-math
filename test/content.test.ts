@@ -337,3 +337,117 @@ test("النصوص التي يكتبها الأستاذ تُهرَّب في كل
   assert.ok(!page.includes("<script>alert(1)</script>"));
   assert.match(page, /&lt;script&gt;/);
 });
+
+// ---------- ملفات PDF ----------
+
+/** مخزن R2 وهمي في الذاكرة. */
+function fakeBucket() {
+  const store = new Map<string, Uint8Array<ArrayBuffer>>();
+  return {
+    store,
+    async put(key: string, value: ArrayBuffer | ReadableStream | Uint8Array) {
+      store.set(key, value instanceof Uint8Array ? new Uint8Array(value) : new Uint8Array(value as ArrayBuffer));
+    },
+    async get(key: string) {
+      const v = store.get(key);
+      return v ? { body: new Blob([v]).stream(), size: v.length } : null;
+    },
+    async delete(keys: string | string[]) {
+      for (const k of Array.isArray(keys) ? keys : [keys]) store.delete(k);
+    },
+  };
+}
+
+const PDF_BYTES = new TextEncoder().encode("%PDF-1.4\n% ملف تجريبي\n%%EOF\n");
+
+function uploadPdf(b: Browser, unitId: number, opts: { bytes?: Uint8Array<ArrayBuffer>; name?: string; title?: string; mode?: string } = {}) {
+  const form = new FormData();
+  form.set("file", new File([opts.bytes ?? PDF_BYTES], opts.name ?? "ملخص الأعداد.pdf", { type: "application/pdf" }));
+  form.set("title", opts.title ?? "");
+  form.set("file_mode", opts.mode ?? "both");
+  return b.request(`/admin/units/${unitId}/pdf`, { method: "POST", headers: { Origin: "https://zinou.test" }, body: form });
+}
+
+test("رفع PDF: يُحفظ في المخزن، وعنوانه من اسم الملف، ويُرفض ما ليس PDF", async () => {
+  const env = contentEnv(false);
+  const bucket = fakeBucket();
+  env.FILES = bucket;
+  const { b: admin } = await setupAdmin(env);
+  const { unitId } = await addUnit(admin, "1am", { title: "مقطع" });
+  const res = await uploadPdf(admin, unitId);
+  assert.equal(res.headers.get("Location"), `/admin/units/${unitId}?done=lesson-added`);
+  const row = env.DB.raw.prepare("SELECT * FROM lessons WHERE unit_id = ?").get(unitId) as Record<string, unknown>;
+  assert.equal(row.kind, "pdf");
+  assert.equal(row.title, "ملخص الأعداد");
+  assert.equal(row.status, "draft");
+  assert.equal(row.file_size, PDF_BYTES.length);
+  assert.deepEqual(bucket.store.get(String(row.file_key)), PDF_BYTES);
+
+  const fake = await uploadPdf(admin, unitId, { bytes: new TextEncoder().encode("<html>ليس PDF</html>"), name: "x.pdf" });
+  assert.equal(fake.status, 400);
+  assert.match(await fake.text(), /ليس PDF/);
+  assert.equal(bucket.store.size, 1);
+});
+
+test("بدون مخزن R2: نموذج الرفع لا يظهر، والرفع يُرفض برسالة واضحة", async () => {
+  const env = contentEnv(false);
+  const { b: admin } = await setupAdmin(env);
+  const { unitId } = await addUnit(admin, "1am", { title: "مقطع" });
+  assert.match(await (await admin.get(`/admin/units/${unitId}`)).text(), /مخزن الملفات \(R2\) غير مفعّل بعد/);
+  const res = await uploadPdf(admin, unitId);
+  assert.equal(res.status, 503);
+});
+
+test("ملف PDF: المجاني يُفتح للجميع حسب طريقة الإتاحة، والمدفوع لا يُرسل لغير المشترك", async () => {
+  const env = contentEnv(false);
+  env.FILES = fakeBucket();
+  const { b: admin } = await setupAdmin(env);
+  const { unitId } = await addUnit(admin, "1am", { title: "مقطع" });
+  await uploadPdf(admin, unitId, { title: "ملخص مجاني", mode: "view" });
+  await uploadPdf(admin, unitId, { title: "ملخص مدفوع", mode: "both" });
+  const [free, paid] = lessons(env, unitId);
+  const visitor = new Browser(env);
+
+  // مسودة: لا شيء
+  assert.equal((await visitor.get(`/files/${free!.id}`)).status, 404);
+  await admin.post(`/admin/units/${unitId}/publish-all`, {});
+  await admin.post(`/admin/units/${unitId}/status`, {});
+  await admin.post(`/admin/lessons/${free!.id}/free`, {});
+
+  const view = await visitor.get(`/files/${free!.id}`);
+  assert.equal(view.status, 200);
+  assert.equal(view.headers.get("Content-Type"), "application/pdf");
+  assert.match(view.headers.get("Content-Disposition") ?? "", /^inline;/);
+  assert.match(view.headers.get("Content-Disposition") ?? "", /filename\*=UTF-8''/);
+  assert.deepEqual(new Uint8Array(await view.arrayBuffer()), PDF_BYTES);
+  // «عرض فقط»: لا رابط تحميل، والتحميل المباشر مرفوض
+  assert.equal((await visitor.get(`/files/${free!.id}?download=1`)).status, 404);
+  const page = await (await visitor.get(`/lessons/${free!.id}`)).text();
+  assert.match(page, /عرض الملف/);
+  assert.doesNotMatch(page, /download=1/);
+
+  // المدفوع: تحويل إلى الاشتراك، دون أي بايت من الملف
+  const locked = await visitor.get(`/files/${paid!.id}`);
+  assert.equal(locked.status, 302);
+  assert.equal(await locked.text(), "");
+  // الأستاذ يحمّله
+  const dl = await admin.get(`/files/${paid!.id}?download=1`);
+  assert.match(dl.headers.get("Content-Disposition") ?? "", /^attachment;/);
+});
+
+test("حذف درس PDF أو مقطعه يحذف الملف من المخزن", async () => {
+  const env = contentEnv(false);
+  const bucket = fakeBucket();
+  env.FILES = bucket;
+  const { b: admin } = await setupAdmin(env);
+  const { unitId } = await addUnit(admin, "1am", { title: "مقطع" });
+  await uploadPdf(admin, unitId);
+  await uploadPdf(admin, unitId);
+  await uploadPdf(admin, unitId);
+  assert.equal(bucket.store.size, 3);
+  const [first] = lessons(env, unitId);
+  await admin.post(`/admin/lessons/${first!.id}/delete`, { confirm: "1" });
+  assert.equal(bucket.store.size, 2);
+  await admin.post(`/admin/units/${unitId}/delete`, { confirm: "1" });
+  assert.equal(bucket.store.size, 0);
+});

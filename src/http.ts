@@ -1,6 +1,6 @@
 // أدوات الرد على الطلبات: الصفحات، والتحويل، والكعكات (cookies)، والحماية من الطلبات المزوّرة.
 
-import type { D1Database } from "./db.ts";
+import type { D1Database, R2Bucket } from "./db.ts";
 
 export interface Env {
   /** الملفات الثابتة (مجلد public) التي ترفعها Cloudflare مع الخادم. */
@@ -15,6 +15,8 @@ export interface Env {
   PASSWORD_ITERATIONS?: string;
   /** مفتاح YouTube Data API لقراءة قوائم التشغيل. سرّ في Cloudflare، لا في الكود. */
   YOUTUBE_API_KEY?: string;
+  /** مخزن ملفات PDF (R2). غير موجود حتى يُفعَّل R2 في حساب Cloudflare. */
+  FILES?: R2Bucket;
 }
 
 /** ترويسات أمان تُضاف إلى كل رد يصدر من الخادم. */
@@ -113,6 +115,35 @@ export async function readForm(request: Request): Promise<Map<string, string>> {
     // نموذج غير صالح: يُعامل كنموذج فارغ
   }
   return out;
+}
+
+export interface Upload {
+  fields: Map<string, string>;
+  file: File | null;
+  /** الطلب أكبر من الحد المسموح */
+  tooLarge: boolean;
+}
+
+/** نموذج فيه ملف (multipart). الحقول النصية كما في readForm، وأول ملف فقط. */
+export async function readUpload(request: Request, maxBytes: number): Promise<Upload> {
+  const fields = new Map<string, string>();
+  const length = Number(request.headers.get("Content-Length") ?? "0");
+  // هامش صغير لحدود النموذج والحقول النصية
+  if (length > maxBytes + 64 * 1024) return { fields, file: null, tooLarge: true };
+  let file: File | null = null;
+  try {
+    const form = await request.formData();
+    for (const [k, v] of form.entries()) {
+      if (typeof v === "string") {
+        if (!fields.has(k)) fields.set(k, v.slice(0, 2000));
+      } else if (!file && v.size > 0) {
+        file = v;
+      }
+    }
+  } catch {
+    // نموذج غير صالح
+  }
+  return { fields, file, tooLarge: Boolean(file && file.size > maxBytes) };
 }
 
 export function field(form: Map<string, string>, name: string): string {

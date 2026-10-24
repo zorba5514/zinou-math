@@ -1,7 +1,8 @@
 // مسارات إدارة المحتوى (للأستاذ فقط؛ التحقق من الصلاحية في admin-routes.ts قبل الوصول إلى هنا).
 
 import { audit, type D1Database, type D1PreparedStatement } from "./db.ts";
-import { field, page, readForm, redirect } from "./http.ts";
+import { field, page, readForm, readUpload, redirect } from "./http.ts";
+import { randomToken } from "./crypto.ts";
 import { getProgram, listPrograms, programUnits, type Lesson, type Program, type Unit } from "./content.ts";
 import { contentHomePage, lessonAdminPage, programAdminPage, unitAdminPage } from "./content-admin-pages.ts";
 import { PLAYLIST_ERRORS, parsePlaylistId, parseVideoId, playlistVideos, videoTitle, type PlaylistVideo } from "./youtube.ts";
@@ -9,6 +10,9 @@ import { notFoundPage } from "./pages.ts";
 import type { Ctx } from "./auth-routes.ts";
 
 const MAX_PASTE = 40;
+/** أكبر حجم لملف PDF: 20 ميغابايت. */
+export const MAX_PDF_BYTES = 20 * 1024 * 1024;
+const FILE_MODES = ["view", "download", "both"] as const;
 
 function adminId(ctx: Ctx): number {
   return ctx.user?.account.id ?? 0;
@@ -51,6 +55,7 @@ export async function handleContentRoutes(ctx: Ctx): Promise<Response | null> {
       if (action === "playlist") return importPlaylist(ctx, program, unit);
       if (action === "videos") return pasteVideos(ctx, program, unit);
       if (action === "publish-all") return publishAll(ctx, unit);
+      if (action === "pdf") return uploadPdf(ctx, program, unit);
     }
     return notFound(ctx);
   }
@@ -175,6 +180,7 @@ async function showUnit(
     unitAdminPage(ctx.view, program, unit, lessons.results, {
       done: ctx.url.searchParams.get("done"),
       hasKey: Boolean(ctx.env.YOUTUBE_API_KEY),
+      hasFiles: Boolean(ctx.env.FILES),
       ...extra,
       notice,
     }),
@@ -228,7 +234,9 @@ async function deleteUnit(ctx: Ctx, program: Program, unit: Unit): Promise<Respo
   const form = await readForm(ctx.request);
   if (form.get("confirm") !== "1") return showUnit(ctx, program, unit, { errors: { form: "ضع علامة على «أؤكد الحذف» لحذف المقطع." } }, 400);
   const db = ctx.env.DB;
+  const files = await db.prepare("SELECT file_key FROM lessons WHERE unit_id = ? AND file_key IS NOT NULL").bind(unit.id).all<{ file_key: string }>();
   await db.batch([db.prepare("DELETE FROM lessons WHERE unit_id = ?").bind(unit.id), db.prepare("DELETE FROM units WHERE id = ?").bind(unit.id)]);
+  if (files.results.length && ctx.env.FILES) await ctx.env.FILES.delete(files.results.map((f) => f.file_key));
   await audit(db, adminId(ctx), "unit.deleted", `unit:${unit.id}`, unit.title);
   return redirect(`/admin/content/${program.slug}?done=unit-deleted`);
 }
@@ -349,6 +357,7 @@ async function editLesson(ctx: Ctx, program: Program, unit: Unit, lesson: Lesson
     free: field(form, "free") === "1" ? "1" : "0",
     status: field(form, "status") === "published" ? "published" : "draft",
     unit_id: field(form, "unit_id"),
+    file_mode: (FILE_MODES as readonly string[]).includes(field(form, "file_mode")) ? field(form, "file_mode") : (lesson.file_mode ?? "both"),
   };
   const errors: Record<string, string> = {};
   if (!validTitle(values.title, 200)) errors.title = "اكتب عنوان الدرس.";
@@ -369,8 +378,8 @@ async function editLesson(ctx: Ctx, program: Program, unit: Unit, lesson: Lesson
     position = pos?.n ?? 1;
   }
   await db
-    .prepare("UPDATE lessons SET title = ?, description = ?, free = ?, status = ?, unit_id = ?, position = ?, updated_at = ? WHERE id = ?")
-    .bind(values.title, values.description || null, Number(values.free), values.status, target.id, position, ctx.now, lesson.id)
+    .prepare("UPDATE lessons SET title = ?, description = ?, free = ?, status = ?, unit_id = ?, position = ?, file_mode = ?, updated_at = ? WHERE id = ?")
+    .bind(values.title, values.description || null, Number(values.free), values.status, target.id, position, lesson.kind === "pdf" ? values.file_mode : null, ctx.now, lesson.id)
     .run();
   await audit(db, adminId(ctx), "lesson.updated", `lesson:${lesson.id}`, values.title);
   return redirect(`/admin/lessons/${lesson.id}?done=lesson-saved`);
@@ -396,6 +405,41 @@ async function deleteLesson(ctx: Ctx, lesson: Lesson): Promise<Response> {
   const form = await readForm(ctx.request);
   if (form.get("confirm") !== "1") return redirect(`/admin/lessons/${lesson.id}`);
   await ctx.env.DB.prepare("DELETE FROM lessons WHERE id = ?").bind(lesson.id).run();
+  if (lesson.file_key && ctx.env.FILES) await ctx.env.FILES.delete(lesson.file_key);
   await audit(ctx.env.DB, adminId(ctx), "lesson.deleted", `lesson:${lesson.id}`, lesson.title);
   return redirect(`/admin/units/${lesson.unit_id}?done=lesson-deleted`);
+}
+
+// ---------- ملفات PDF ----------
+
+async function uploadPdf(ctx: Ctx, program: Program, unit: Unit): Promise<Response> {
+  const bucket = ctx.env.FILES;
+  if (!bucket) return showUnit(ctx, program, unit, { errors: { pdf: "مخزن الملفات غير مفعّل بعد في Cloudflare." } }, 503);
+  const upload = await readUpload(ctx.request, MAX_PDF_BYTES);
+  const values = { pdf_title: upload.fields.get("title")?.trim() ?? "", file_mode: upload.fields.get("file_mode") ?? "both" };
+  const fail = (message: string, status = 400) => showUnit(ctx, program, unit, { errors: { pdf: message }, values }, status);
+  if (upload.tooLarge) return fail("الملف أكبر من 20 ميغابايت. صغّر حجمه (مثلًا بحفظه بجودة أقل) ثم أعد المحاولة.", 413);
+  const file = upload.file;
+  if (!file) return fail("اختر ملف PDF.");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // نتحقق من محتوى الملف نفسه، لا من اسمه فقط: كل ملف PDF يبدأ بـ %PDF-
+  const isPdf = bytes.length > 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+  if (!isPdf) return fail("هذا الملف ليس PDF.");
+  const mode = (FILE_MODES as readonly string[]).includes(values.file_mode) ? values.file_mode : "both";
+  const name = (file.name || "ملف.pdf").replace(/[\u0000-\u001f\\/]/g, "").slice(0, 150) || "ملف.pdf";
+  const title = values.pdf_title.length >= 2 ? values.pdf_title.slice(0, 200) : name.replace(/\.pdf$/i, "").slice(0, 200) || "ملف PDF";
+
+  const key = `lessons/${unit.id}/${randomToken()}.pdf`;
+  await bucket.put(key, bytes, { httpMetadata: { contentType: "application/pdf" } });
+  const db = ctx.env.DB;
+  const pos = await db.prepare("SELECT COALESCE(MAX(position), 0) + 1 AS n FROM lessons WHERE unit_id = ?").bind(unit.id).first<{ n: number }>();
+  await db
+    .prepare(
+      `INSERT INTO lessons (unit_id, kind, title, position, free, status, file_key, file_name, file_size, file_mode, created_at, updated_at)
+       VALUES (?, 'pdf', ?, ?, 0, 'draft', ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(unit.id, title, pos?.n ?? 1, key, name, bytes.length, mode, ctx.now, ctx.now)
+    .run();
+  await audit(db, adminId(ctx), "pdf.uploaded", `unit:${unit.id}`, title);
+  return redirect(`/admin/units/${unit.id}?done=lesson-added`);
 }

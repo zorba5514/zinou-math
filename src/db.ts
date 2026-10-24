@@ -19,6 +19,18 @@ export interface D1Database {
   batch(statements: D1PreparedStatement[]): Promise<D1Result[]>;
 }
 
+/** ما نستعمله من مخزن الملفات R2 (نفس واجهة Cloudflare الرسمية). */
+export interface R2ObjectBody {
+  body: ReadableStream;
+  size: number;
+}
+
+export interface R2Bucket {
+  put(key: string, value: ArrayBuffer | ReadableStream | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
+  get(key: string): Promise<R2ObjectBody | null>;
+  delete(keys: string | string[]): Promise<void>;
+}
+
 export interface Account {
   id: number;
   role: "parent" | "admin";

@@ -29,3 +29,8 @@ database_name = "zinou-math-staging"
 # يكتبه scripts/ensure-d1.mjs آليًا أثناء النشر
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+# مخزن ملفات PDF. ينشئه scripts/ensure-r2.mjs أثناء النشر، ويحذف هذا القسم مؤقتًا إن لم يكن R2 مفعّلًا بعد.
+[[env.staging.r2_buckets]]
+binding = "FILES"
+bucket_name = "zinou-math-staging-files"

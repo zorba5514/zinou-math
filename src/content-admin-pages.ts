@@ -4,7 +4,13 @@ import { html, type Raw } from "./html.ts";
 import { icon } from "./icons.ts";
 import { alertBox, input, select, textarea, type View } from "./ui.ts";
 import { adminLayout, when } from "./admin-pages.ts";
-import { KIND_LABELS, unitWord, type Lesson, type Program, type ProgramSummary, type Unit, type UnitWithLessons } from "./content.ts";
+import { KIND_LABELS, formatSize, unitWord, type Lesson, type Program, type ProgramSummary, type Unit, type UnitWithLessons } from "./content.ts";
+
+export const FILE_MODE_OPTIONS = [
+  { value: "both", label: "عرض وتحميل" },
+  { value: "view", label: "عرض فقط (بدون زر تحميل)" },
+  { value: "download", label: "تحميل فقط" },
+];
 
 function statusPill(status: "draft" | "published"): Raw {
   return status === "published"
@@ -173,6 +179,7 @@ export function unitAdminPage(
     errors?: Record<string, string>;
     values?: Record<string, string>;
     hasKey: boolean;
+    hasFiles: boolean;
   },
 ): string {
   const e = o.errors ?? {};
@@ -221,6 +228,21 @@ ${alertBox(e.form)}
     <button class="btn btn-primary btn-sm" type="submit"${o.hasKey ? "" : html` disabled`}>${icon("refresh")}${unit.playlist_id ? "تحديث من يوتيوب" : "استيراد الفيديوهات"}</button>
   </form>
   <p class="muted small">الفيديوهات الجديدة تُضاف في آخر المقطع كمسودات مدفوعة. الموجودة لا تتكرر ولا تتغير عناوينها.</p>
+</section>
+
+<section class="card form-card" aria-labelledby="pdf-title">
+  <h2 id="pdf-title">${icon("pdf")} رفع ملف PDF</h2>
+  ${alertBox(e.pdf)}
+  ${
+    o.hasFiles
+      ? html`<form method="post" action="/admin/units/${id}/pdf" enctype="multipart/form-data" class="form" novalidate>
+    <div class="field"><label for="f-file">الملف (حتى 20 ميغابايت)</label><input id="f-file" class="input input-file" type="file" name="file" accept="application/pdf,.pdf" required></div>
+    ${input({ name: "title", label: "العنوان (اختياري)", value: o.values?.pdf_title, maxlength: 200, hint: "إن تركته فارغًا يُستعمل اسم الملف." })}
+    ${select({ name: "file_mode", label: "طريقة الإتاحة", options: FILE_MODE_OPTIONS, value: o.values?.file_mode ?? "both" })}
+    <button class="btn btn-primary btn-sm" type="submit">${icon("upload")}رفع</button>
+  </form>`
+      : alertBox("مخزن الملفات (R2) غير مفعّل بعد في حساب Cloudflare. بعد تفعيله يظهر هنا نموذج الرفع.", "info")
+  }
 </section>
 
 <section class="card form-card" aria-labelledby="paste-title">
@@ -276,7 +298,9 @@ ${alertBox(doneMessage(o.done ?? null), "success")}
 ${
   lesson.kind === "video" && lesson.youtube_id
     ? html`<p class="muted small">الفيديو على يوتيوب: <a href="https://youtu.be/${lesson.youtube_id}" target="_blank" rel="noopener" dir="ltr">youtu.be/${lesson.youtube_id}</a></p>`
-    : ""
+    : lesson.kind === "pdf"
+      ? html`<p class="muted small">الملف: <bdi>${lesson.file_name ?? ""}</bdi>${lesson.file_size ? html` (<bdi dir="ltr">${formatSize(lesson.file_size)}</bdi>)` : ""}</p>`
+      : ""
 }
 <section class="card form-card">
   <form method="post" action="/admin/lessons/${id}/edit" class="form" novalidate>
@@ -284,6 +308,7 @@ ${
     ${textarea({ name: "description", label: "وصف قصير (اختياري)", value: v.description ?? lesson.description ?? "", rows: 3, maxlength: 1000 })}
     ${select({ name: "free", label: "الإتاحة", options: [{ value: "0", label: "مدفوع: للمشتركين فقط" }, { value: "1", label: "مجاني: للجميع" }], value: v.free ?? String(lesson.free) })}
     ${select({ name: "status", label: "الحالة", options: [{ value: "draft", label: "مسودة: لا يظهر في الموقع" }, { value: "published", label: "منشور" }], value: v.status ?? lesson.status })}
+    ${lesson.kind === "pdf" ? select({ name: "file_mode", label: "طريقة الإتاحة", options: FILE_MODE_OPTIONS, value: v.file_mode ?? lesson.file_mode ?? "both" }) : ""}
     ${select({ name: "unit_id", label: unitWord(program) === "المقطع" ? "المقطع" : "الجزء", options: units.map((u) => ({ value: String(u.id), label: u.title })), value: v.unit_id ?? String(lesson.unit_id), error: e.unit_id })}
     <button class="btn btn-primary btn-sm" type="submit">حفظ</button>
   </form>

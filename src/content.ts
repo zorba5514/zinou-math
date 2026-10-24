@@ -82,6 +82,12 @@ export function unitWord(program: Pick<Program, "kind">, plural = false): string
   return plural ? "أجزاء" : "الجزء";
 }
 
+/** حجم الملف بصيغة مقروءة: KB تحت الميغابايت، وMB فوقه. */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 // ---------- القراءة ----------
 
 /**

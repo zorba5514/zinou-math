@@ -8,6 +8,7 @@ import { icon, type IconName } from "./icons.ts";
 import { describe, formula, intercept, linePath, toY, SIZE, UNIT } from "../public/graph.js";
 import {
   KIND_LABELS,
+  formatSize,
   canOpen,
   unitWord,
   type Lesson,
@@ -215,7 +216,7 @@ function lessonBody(c: LessonContext): Raw {
   const id = String(lesson.id);
   return html`<section class="card file-card">
   <span class="icon-box icon-box-lg">${icon("pdf")}</span>
-  <div class="file-main"><strong>${lesson.file_name ?? lesson.title}</strong>${lesson.file_size ? html`<small dir="ltr">${(lesson.file_size / 1024 / 1024).toFixed(1)} MB</small>` : ""}</div>
+  <div class="file-main"><strong>${lesson.file_name ?? lesson.title}</strong>${lesson.file_size ? html`<small dir="ltr">${formatSize(lesson.file_size)}</small>` : ""}</div>
   <div class="actions">
     ${mode !== "download" ? html`<a class="btn btn-primary" href="/files/${id}" target="_blank" rel="noopener">${icon("book")}عرض الملف</a>` : ""}
     ${mode !== "view" ? html`<a class="btn btn-secondary" href="/files/${id}?download=1">${icon("pdf")}تحميل</a>` : ""}
