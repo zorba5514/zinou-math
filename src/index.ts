@@ -2,8 +2,8 @@
 // الملفات الثابتة (الشعار، التنسيق) تقدّمها Cloudflare مباشرة من مجلد public.
 // كل طلب آخر يصل إلى هنا: الصفحات تُبنى في الخادم، وطلبات /api/* للبيانات.
 
-import { findItem, findProgram } from "./catalog.ts";
-import { homePage, itemPage, levelsPage, notFoundPage, programPage, subscribePage } from "./pages.ts";
+import { canOpen, getLesson, getProgram, isPublished, listPrograms, programUnits, type Lesson } from "./content.ts";
+import { homePage, lessonPage, levelsPage, notFoundPage, programPage, subscribePage } from "./pages.ts";
 import { currentSession } from "./auth.ts";
 import { handleAuthRoutes, type Ctx } from "./auth-routes.ts";
 import { handleAdminRoutes } from "./admin-routes.ts";
@@ -51,27 +51,39 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
   return json({ error: "not_found" }, 404);
 }
 
-function publicRoutes(ctx: Ctx): Response | null {
+async function publicRoutes(ctx: Ctx): Promise<Response | null> {
   const { path, url, view } = ctx;
-  if (path === "/") return page(homePage(view));
-  if (path === "/levels") return page(levelsPage(view));
+  const db = ctx.env.DB;
+  // الأستاذ يرى المسودات أيضًا (معاينة)، والبقية يرون المنشور فقط
+  const isAdmin = view.viewer?.role === "admin";
+  if (path === "/") return page(homePage(view, await listPrograms(db)));
+  if (path === "/levels") return page(levelsPage(view, await listPrograms(db)));
   if (path === "/subscribe") {
-    const found = findItem(url.searchParams.get("item") ?? "");
-    const locked = found && !found.item.free ? { program: found.program, item: found.item } : undefined;
+    const id = url.searchParams.get("lesson") ?? "";
+    const found = /^\d{1,12}$/.test(id) ? await getLesson(db, Number(id)) : null;
+    const locked = found && isPublished(found) && !found.lesson.free ? { program: found.program, lesson: found.lesson } : undefined;
     return page(subscribePage(view, locked));
   }
   const programMatch = /^\/levels\/([a-z0-9-]+)$/.exec(path);
   if (programMatch) {
-    const program = findProgram(programMatch[1] ?? "");
-    return program ? page(programPage(view, program)) : page(notFoundPage(view), 404);
+    const program = await getProgram(db, programMatch[1] ?? "");
+    if (!program) return page(notFoundPage(view), 404);
+    return page(programPage(view, program, await programUnits(db, program.slug, { drafts: isAdmin })));
   }
-  const itemMatch = /^\/items\/([a-z0-9-]+)$/.exec(path);
-  if (itemMatch) {
-    const found = findItem(itemMatch[1] ?? "");
-    if (!found) return page(notFoundPage(view), 404);
-    // المحتوى المدفوع لا يُعرض أبدًا للزائر: يُحوَّل إلى صفحة الاشتراك.
-    if (!found.item.free) return redirect(`/subscribe?item=${encodeURIComponent(found.item.id)}`, [], 302);
-    return page(itemPage(view, found.program, found.unit, found.item));
+  const lessonMatch = /^\/lessons\/(\d{1,12})$/.exec(path);
+  if (lessonMatch) {
+    const found = await getLesson(db, Number(lessonMatch[1]));
+    if (!found || (!isPublished(found) && !isAdmin)) return page(notFoundPage(view), 404);
+    // المدفوع لا يُعرض أبدًا لمن لا يحق له: يُحوَّل إلى صفحة الاشتراك، ولا يصل إليه معرّف الفيديو
+    if (!canOpen(view.viewer, found.lesson)) return redirect(`/subscribe?lesson=${found.lesson.id}`, [], 302);
+    const next = await db
+      .prepare(
+        `SELECT * FROM lessons WHERE unit_id = ? AND (position > ? OR (position = ? AND id > ?)) ${isAdmin ? "" : "AND status = 'published'"}
+         ORDER BY position, id LIMIT 1`,
+      )
+      .bind(found.unit.id, found.lesson.position, found.lesson.position, found.lesson.id)
+      .first<Lesson>();
+    return page(lessonPage(view, found, next));
   }
   return null;
 }
@@ -132,7 +144,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   if (routed) return routed;
 
   if (method === "POST") return page(notFoundPage(view), 404);
-  const pub = publicRoutes(ctx);
+  const pub = await publicRoutes(ctx);
   if (pub) return pub;
 
   const asset = await env.ASSETS.fetch(request);

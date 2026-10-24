@@ -3,16 +3,12 @@
 import { html, type Raw } from "./html.ts";
 import { icon } from "./icons.ts";
 import { alertBox, input, layout, phoneExample, select, type View } from "./ui.ts";
-import { PROGRAMS, findProgram } from "./catalog.ts";
+import { LEVELS, levelTitle } from "./content.ts";
 import { formatPhone, whatsappNumber } from "./phone.ts";
 import type { Account, Device, Student } from "./db.ts";
 
-export const LEVEL_OPTIONS = PROGRAMS.filter((p) => p.kind === "level").map((p) => ({ value: p.slug, label: p.title }));
+export const LEVEL_OPTIONS = LEVELS.map((l) => ({ value: l.slug, label: l.title }));
 export const CHILD_SLOTS = 4;
-
-function levelTitle(slug: string): string {
-  return findProgram(slug)?.title ?? slug;
-}
 
 export type FamilyState = "active" | "new" | "locked" | "disabled";
 
@@ -36,7 +32,7 @@ function statePill(state: FamilyState): Raw {
   }
 }
 
-function adminLayout(view: View, title: string, current: Parameters<typeof layout>[0]["current"], body: Raw, scripts?: string[]): string {
+export function adminLayout(view: View, title: string, current: Parameters<typeof layout>[0]["current"], body: Raw, scripts?: string[]): string {
   return layout({ title, view, current, body, area: "admin", scripts });
 }
 
@@ -115,7 +111,7 @@ const ACTION_LABELS: Record<string, string> = {
   logout: "تسجيل خروج",
 };
 
-function when(at: number): string {
+export function when(at: number): string {
   return new Intl.DateTimeFormat("ar-DZ-u-nu-latn", {
     timeZone: "Africa/Algiers",
     day: "numeric",
@@ -137,6 +133,7 @@ export function dashboardPage(view: View, d: DashboardData): string {
   <div class="actions">
     <a class="btn btn-primary" href="/admin/families/new">${icon("userPlus")}إضافة عائلة</a>
     <a class="btn btn-secondary" href="/admin/families">${icon("users")}كل العائلات</a>
+    <a class="btn btn-secondary" href="/admin/content">${icon("book")}المحتوى</a>
   </div>
 </section>
 ${pendingDevicesSection(d.devices)}

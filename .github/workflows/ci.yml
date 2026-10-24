@@ -83,6 +83,17 @@ jobs:
             exit 0
           fi
           printf '%s' "$ADMIN_SETUP_CODE" | npx wrangler secret put ADMIN_SETUP_CODE --env staging
+      - name: مفتاح يوتيوب
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          if [ -z "$YOUTUBE_API_KEY" ]; then
+            echo "::warning title=مفتاح يوتيوب::السر YOUTUBE_API_KEY غير موجود في GitHub. استيراد قوائم التشغيل لن يعمل حتى يُضاف، ولصق الروابط يعمل."
+            exit 0
+          fi
+          printf '%s' "$YOUTUBE_API_KEY" | npx wrangler secret put YOUTUBE_API_KEY --env staging
       - name: النشر
         id: deploy
         env:

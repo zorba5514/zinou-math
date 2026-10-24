@@ -23,6 +23,22 @@ function fakeEnv(appEnv = "test"): Env & { assetCalls: string[]; DB: ReturnType<
 }
 
 const base = "https://example.test";
+
+/** محتوى تجريبي: مقطع منشور في 1 متوسط فيه درس مجاني ودرس مدفوع ودرس مسودة، ومقطع مسودة. */
+function seedContent(env: ReturnType<typeof fakeEnv>) {
+  const now = Date.now();
+  env.DB.raw.exec(`
+    INSERT INTO units (id, program_slug, title, position, status, created_at, updated_at) VALUES
+      (1, '1am', 'المقطع الأول: الأعداد', 1, 'published', ${now}, ${now}),
+      (2, '1am', 'مقطع لم يُنشر', 2, 'draft', ${now}, ${now});
+    INSERT INTO lessons (id, unit_id, kind, title, position, free, status, youtube_id, created_at, updated_at) VALUES
+      (1, 1, 'video', 'درس مجاني', 1, 1, 'published', 'FREEvid0001', ${now}, ${now}),
+      (2, 1, 'video', 'درس مدفوع', 2, 0, 'published', 'PAIDvid0002', ${now}, ${now}),
+      (3, 1, 'video', 'درس مسودة', 3, 1, 'draft', 'DRAFTvid003', ${now}, ${now}),
+      (4, 2, 'video', 'درس في مقطع مسودة', 1, 1, 'published', 'HIDDENvid04', ${now}, ${now});
+  `);
+  return env;
+}
 const get = (path: string, env = fakeEnv(), init?: RequestInit) =>
   handleRequest(new Request(`${base}${path}`, init), env);
 
@@ -49,8 +65,9 @@ test("مسار API غير معروف يرد 404 ولا يصل إلى الملف�
 });
 
 test("الصفحات العامة ترد 200 بصفحة عربية", async () => {
-  for (const path of ["/", "/levels", "/levels/1am", "/levels/olympiad", "/subscribe", "/items/1am-u1-i1", "/levels/"]) {
-    const res = await get(path);
+  const env = seedContent(fakeEnv());
+  for (const path of ["/", "/levels", "/levels/1am", "/levels/olympiad", "/subscribe", "/lessons/1", "/levels/"]) {
+    const res = await get(path, env);
     assert.equal(res.status, 200, path);
     assert.match(res.headers.get("Content-Type") ?? "", /text\/html/, path);
     assert.match(await res.text(), /<html lang="ar" dir="rtl">/, path);
@@ -65,27 +82,52 @@ test("الصفحات تحمل ترويسات الأمان وسياسة المح�
   }
 });
 
-test("العنصر المدفوع لا يُعرض للزائر بل يُحوَّل إلى صفحة الاشتراك", async () => {
-  const res = await get("/items/1am-u1-i3");
+test("الدرس المجاني يعرض الفيديو، والمدفوع يُحوَّل إلى الاشتراك دون كشف معرّف الفيديو", async () => {
+  const env = seedContent(fakeEnv());
+  const free = await (await get("/lessons/1", env)).text();
+  assert.match(free, /youtube-nocookie\.com\/embed\/FREEvid0001/);
+  const res = await get("/lessons/2", env);
   assert.equal(res.status, 302);
-  assert.equal(res.headers.get("Location"), "/subscribe?item=1am-u1-i3");
+  assert.equal(res.headers.get("Location"), "/subscribe?lesson=2");
+  assert.equal(await res.text(), "");
+  // صفحة المستوى تذكر عنوان الدرس المدفوع بقفل، ولا تحتوي أي معرّف فيديو
+  const level = await (await get("/levels/1am", env)).text();
+  assert.match(level, /درس مدفوع/);
+  assert.match(level, /href="\/subscribe\?lesson=2"/);
+  for (const id of ["FREEvid0001", "PAIDvid0002", "DRAFTvid003", "HIDDENvid04"]) assert.ok(!level.includes(id), id);
 });
 
-test("صفحة الاشتراك تذكر العنصر المقفل الذي جاء منه الزائر", async () => {
-  const body = await (await get("/subscribe?item=1am-u1-i3")).text();
-  assert.match(body, /درس تجريبي مدفوع/);
+test("المسودة لا تظهر لأحد: لا الدرس المسودة ولا المقطع المسودة", async () => {
+  const env = seedContent(fakeEnv());
+  const level = await (await get("/levels/1am", env)).text();
+  assert.doesNotMatch(level, /درس مسودة/);
+  assert.doesNotMatch(level, /مقطع لم يُنشر/);
+  assert.equal((await get("/lessons/3", env)).status, 404);
+  assert.equal((await get("/lessons/4", env)).status, 404);
+});
+
+test("صفحة الاشتراك تذكر الدرس المقفل الذي جاء منه الزائر", async () => {
+  const env = seedContent(fakeEnv());
+  const body = await (await get("/subscribe?lesson=2", env)).text();
+  assert.match(body, /درس مدفوع/);
   assert.match(body, /السنة الأولى متوسط/);
 });
 
-test("صفحة الاشتراك لا تذكر عنصرًا مجانيًا أو غير موجود كأنه مقفل", async () => {
-  for (const q of ["1am-u1-i1", "nothing", "<script>"]) {
-    const body = await (await get(`/subscribe?item=${encodeURIComponent(q)}`)).text();
+test("صفحة الاشتراك لا تذكر درسًا مجانيًا أو مسودة أو غير موجود كأنه مقفل", async () => {
+  const env = seedContent(fakeEnv());
+  for (const q of ["1", "3", "999", "nothing", "<script>"]) {
+    const body = await (await get(`/subscribe?lesson=${encodeURIComponent(q)}`, env)).text();
     assert.doesNotMatch(body, /notice-lock/, q);
   }
 });
 
+test("المستوى بلا دروس منشورة يقول إنها قيد الإعداد", async () => {
+  const body = await (await get("/levels/3am")).text();
+  assert.match(body, /الدروس قيد الإعداد/);
+});
+
 test("الروابط غير الموجودة ترد بصفحة 404 عربية", async () => {
-  for (const path of ["/levels/xyz", "/items/xyz", "/nothing-here"]) {
+  for (const path of ["/levels/xyz", "/lessons/999", "/lessons/abc", "/nothing-here"]) {
     const res = await get(path);
     assert.equal(res.status, 404, path);
     assert.match(await res.text(), /الصفحة غير موجودة/, path);
@@ -126,7 +168,7 @@ test("قواعد التحميل المسبق تُقدَّم بالنوع الص�
 
 test("فحص الصحة يكشف قاعدة بيانات بلا جداول", async () => {
   const env = fakeEnv();
-  env.DB.raw.exec("DROP TABLE recovery_codes; DROP TABLE devices; DROP TABLE sessions; DROP TABLE students; DROP TABLE accounts;");
+  env.DB.raw.exec("PRAGMA foreign_keys = OFF; DROP TABLE recovery_codes; DROP TABLE devices; DROP TABLE sessions; DROP TABLE students; DROP TABLE accounts;");
   const res = await get("/api/health", env);
   assert.equal(res.status, 503);
   assert.equal((await res.json()).database, "error");

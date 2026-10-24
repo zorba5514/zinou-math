@@ -3,13 +3,9 @@
 import { html, type Raw } from "./html.ts";
 import { icon } from "./icons.ts";
 import { alertBox, input, layout, logoutForm, type View } from "./ui.ts";
-import { findProgram } from "./catalog.ts";
+import { LEVELS, levelTitle } from "./content.ts";
 import { formatPhone } from "./phone.ts";
 import type { Account, Device, Student } from "./db.ts";
-
-function levelTitle(slug: string): string {
-  return findProgram(slug)?.title ?? slug;
-}
 
 function initial(name: string): string {
   return name.trim().charAt(0) || "؟";
@@ -91,7 +87,7 @@ export function unlockPage(
 // ---------- صفحة الابن ----------
 
 export function studentHomePage(view: View, student: Student): string {
-  const program = findProgram(student.level);
+  const program = LEVELS.find((l) => l.slug === student.level);
   return layout({
     title: student.name,
     view,

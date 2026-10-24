@@ -511,3 +511,39 @@ select.input { appearance: none; padding-inline-end: 44px; background-image: url
 .form-card .pin-pair .field + .field { margin-top: 0; }
 .pin-pair .input { letter-spacing: .4em; text-align: center; }
 .pin-remove { margin-top: 6px; }
+
+/* ---------- المرحلة 4: المحتوى ---------- */
+.video-frame { margin-top: 18px; aspect-ratio: 16 / 9; border-radius: var(--radius-card); overflow: hidden; background: #000; box-shadow: var(--shadow); }
+.video-frame iframe { width: 100%; height: 100%; border: 0; display: block; }
+.file-card { margin-top: 18px; padding: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+.file-card .actions { margin-top: 0; width: 100%; }
+.file-main { flex: 1; min-width: 12em; display: flex; flex-direction: column; }
+.file-main small { color: var(--label); }
+.lesson-text { margin-top: 18px; line-height: 1.8; white-space: pre-line; }
+.lesson-nav { margin-top: 24px; }
+
+.btn-xs { min-height: 36px; padding: 0 12px; font-size: 14px; border-radius: 12px; gap: 6px; }
+.btn-danger { background: #B42318; color: #fff; }
+.btn-danger-link { color: var(--danger-ink); display: inline-flex; align-items: center; gap: 6px; text-decoration: none; list-style: none; }
+.btn-danger-link::-webkit-details-marker { display: none; }
+.danger-zone { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.danger-zone .form { margin-top: 10px; }
+.textarea { min-height: 112px; padding-block: 12px; resize: vertical; font-family: inherit; line-height: 1.6; }
+
+.admin-list { list-style: none; margin: 0; padding: 4px 16px; }
+.admin-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.admin-list > li:last-child { border-bottom: 0; }
+.admin-list-main { flex: 1; min-width: 10em; display: flex; flex-direction: column; color: inherit; text-decoration: none; line-height: 1.45; }
+.admin-list-main:hover strong { text-decoration: underline; }
+.admin-list-main small { color: var(--label); font-size: 14px; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.move-btns { display: inline-flex; gap: 4px; }
+.icon-btn { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.icon-btn:hover { border-color: var(--ink-3); }
+.icon-btn-off { opacity: .35; cursor: default; }
+.lesson-pills { display: inline-flex; gap: 6px; }
+.lesson-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; padding-inline-start: 56px; }
+@media (min-width: 900px) { .lesson-actions { width: auto; padding-inline-start: 0; } }
+.unit-head h1 { margin: 0; font-size: 26px; }
+.unit-head p { margin: 6px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+@media (min-width: 900px) { .admin-grid-even > :first-child { grid-row: auto; } }
+.btn:disabled, .btn[disabled] { opacity: .45; box-shadow: none; cursor: not-allowed; transform: none; }

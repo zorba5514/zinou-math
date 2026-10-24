@@ -5,7 +5,7 @@ import { endOtherSessions, passwordIterations } from "./auth.ts";
 import { hashPassword, temporaryPassword } from "./crypto.ts";
 import { field, page, readForm, redirect } from "./http.ts";
 import { normalizePhone } from "./phone.ts";
-import { findProgram } from "./catalog.ts";
+import { isLevel } from "./content.ts";
 import {
   CHILD_SLOTS,
   credentialsPage,
@@ -18,6 +18,7 @@ import {
   type PendingDevice,
 } from "./admin-pages.ts";
 import { notFoundPage } from "./pages.ts";
+import { handleContentRoutes } from "./content-admin-routes.ts";
 import type { Ctx } from "./auth-routes.ts";
 
 function validName(name: string): boolean {
@@ -25,7 +26,7 @@ function validName(name: string): boolean {
 }
 
 function validLevel(slug: string): boolean {
-  return findProgram(slug)?.kind === "level";
+  return isLevel(slug);
 }
 
 export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
@@ -34,6 +35,9 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
   if (!ctx.user) return redirect(`/login?next=${encodeURIComponent(path)}`);
   // غير الأستاذ لا يرى حتى وجود هذه الصفحات
   if (ctx.user.account.role !== "admin") return page(notFoundPage(ctx.view), 404);
+
+  const content = await handleContentRoutes(ctx);
+  if (content) return content;
 
   if (path === "/admin" && method === "GET") return dashboard(ctx);
   if (path === "/admin/families" && method === "GET") return familiesList(ctx);

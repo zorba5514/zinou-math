@@ -13,6 +13,8 @@ export interface Env {
   ADMIN_SETUP_CODE?: string;
   /** قوة تشفير كلمات المرور (عدد التكرارات). */
   PASSWORD_ITERATIONS?: string;
+  /** مفتاح YouTube Data API لقراءة قوائم التشغيل. سرّ في Cloudflare، لا في الكود. */
+  YOUTUBE_API_KEY?: string;
 }
 
 /** ترويسات أمان تُضاف إلى كل رد يصدر من الخادم. */
@@ -26,6 +28,7 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 /** سياسة المحتوى للصفحات: لا كود ولا تنسيق إلا من موقعنا. */
 export const PAGE_CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; " +
+  "frame-src https://www.youtube-nocookie.com; " +
   "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
 export function json(data: unknown, status = 200): Response {

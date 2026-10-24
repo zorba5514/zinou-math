@@ -40,6 +40,7 @@ export type NavKey =
   | "admin"
   | "families"
   | "new-family"
+  | "content"
   | null;
 
 function navItem(href: string, label: string, ic: IconName, key: NavKey, current: NavKey): Raw {
@@ -91,6 +92,7 @@ function drawerNav(area: "public" | "admin", view: View, current: NavKey): Raw {
       ${navItem("/admin", "الرئيسية", "home", "admin", current)}
       ${navItem("/admin/families", "العائلات", "users", "families", current)}
       ${navItem("/admin/families/new", "إضافة عائلة", "userPlus", "new-family", current)}
+      ${navItem("/admin/content", "المحتوى", "book", "content", current)}
     </nav>
     <p class="drawer-label">الموقع</p>
     <nav class="drawer-nav" aria-label="الموقع">
@@ -194,6 +196,17 @@ export function input(o: InputOpts): Raw {
   return html`<div class="field${o.error ? " field-invalid" : ""}">
   <label for="${id}">${o.label}</label>
   <input id="${id}" class="input" name="${o.name}" type="${o.type ?? "text"}"${o.value ? html` value="${o.value}"` : ""}${o.autocomplete ? html` autocomplete="${o.autocomplete}"` : ""}${o.inputmode ? html` inputmode="${o.inputmode}"` : ""}${o.dir ? html` dir="${o.dir}"` : ""}${o.maxlength ? html` maxlength="${String(o.maxlength)}"` : ""}${o.required ? html` required` : ""}${o.autofocus ? html` autofocus` : ""}${o.error ? html` aria-invalid="true"` : ""}${describedBy ? html` aria-describedby="${describedBy}"` : ""}>
+  ${o.hint ? html`<p class="field-hint" id="${id}-hint">${o.hint}</p>` : ""}
+  ${o.error ? html`<p class="field-error" id="${id}-error">${o.error}</p>` : ""}
+</div>`;
+}
+
+export function textarea(o: { name: string; label: string; value?: string; hint?: string | Raw; error?: string; rows?: number; dir?: "ltr" | "rtl"; maxlength?: number }): Raw {
+  const id = `f-${o.name}`;
+  const describedBy = [o.hint ? `${id}-hint` : "", o.error ? `${id}-error` : ""].filter(Boolean).join(" ");
+  return html`<div class="field${o.error ? " field-invalid" : ""}">
+  <label for="${id}">${o.label}</label>
+  <textarea id="${id}" class="input textarea" name="${o.name}" rows="${String(o.rows ?? 4)}"${o.dir ? html` dir="${o.dir}"` : ""}${o.maxlength ? html` maxlength="${String(o.maxlength)}"` : ""}${o.error ? html` aria-invalid="true"` : ""}${describedBy ? html` aria-describedby="${describedBy}"` : ""}>${o.value ?? ""}</textarea>
   ${o.hint ? html`<p class="field-hint" id="${id}-hint">${o.hint}</p>` : ""}
   ${o.error ? html`<p class="field-error" id="${id}-error">${o.error}</p>` : ""}
 </div>`;
