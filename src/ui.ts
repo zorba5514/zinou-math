@@ -145,6 +145,7 @@ ${staging || area === "admin" ? html`<meta name="robots" content="noindex">` : "
 <link rel="preload" href="/fonts/tajawal-ar-400.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/tajawal-ar-800.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
+${opts.body.value.includes('class="katex') || (opts.scripts ?? []).some((x) => x.startsWith("/katex/")) ? html`<link rel="stylesheet" href="/katex/katex.min.css">` : ""}
 ${(opts.scripts ?? []).map((src) => html`<script type="module" src="${src}"></script>`)}
 </head>
 <body>
@@ -208,7 +209,7 @@ export function input(o: InputOpts): Raw {
 </div>`;
 }
 
-export function textarea(o: { name: string; label: string; value?: string; hint?: string | Raw; error?: string; rows?: number; dir?: "ltr" | "rtl"; maxlength?: number }): Raw {
+export function textarea(o: { name: string; label: string; value?: string; hint?: string | Raw; error?: string; rows?: number; dir?: "ltr" | "rtl" | "auto"; maxlength?: number }): Raw {
   const id = `f-${o.name}`;
   const describedBy = [o.hint ? `${id}-hint` : "", o.error ? `${id}-error` : ""].filter(Boolean).join(" ");
   return html`<div class="field${o.error ? " field-invalid" : ""}">

@@ -95,6 +95,7 @@ export interface DashboardData {
   pending: number;
   devices: PendingDevice[];
   ending: EndingSoon[];
+  grading: { id: number; submitted_at: number; student: string; quiz: string }[];
   recent: { at: number; action: string; detail: string | null; name: string | null }[];
 }
 
@@ -124,6 +125,24 @@ const ACTION_LABELS: Record<string, string> = {
   "subscription.activated": "تفعيل اشتراك",
   "subscription.deleted": "حذف اشتراك",
   "settings.updated": "تعديل الإعدادات",
+  "quiz.added": "إنشاء اختبار",
+  "course.added": "إضافة دورة",
+  "course.updated": "تعديل اسم دورة",
+  "course.deleted": "حذف دورة",
+  "unit.added": "إضافة مقطع",
+  "unit.published": "نشر مقطع",
+  "unit.hidden": "إخفاء مقطع",
+  "unit.deleted": "حذف مقطع",
+  "lessons.published": "نشر دروس مقطع",
+  "lesson.updated": "تعديل درس",
+  "lesson.deleted": "حذف درس",
+  "playlist.imported": "استيراد قائمة تشغيل",
+  "videos.added": "إضافة فيديوهات",
+  "pdf.uploaded": "رفع ملف PDF",
+  "attempt.submitted": "تسليم اختبار",
+  "attempt.graded": "تصحيح محاولة",
+  "quiz.released": "نشر نتائج اختبار",
+  "quiz.hidden": "إخفاء نتائج اختبار",
   login: "تسجيل دخول",
   logout: "تسجيل خروج",
 };
@@ -154,6 +173,19 @@ export function dashboardPage(view: View, d: DashboardData): string {
   </div>
 </section>
 ${pendingDevicesSection(d.devices)}
+${
+  d.grading.length
+    ? html`<section class="section" aria-labelledby="grading-title">
+  <h2 id="grading-title">بانتظار تصحيحك <span class="pill pill-warning">${d.grading.length}</span></h2>
+  <ul class="card device-list">${d.grading.map(
+    (g) => html`<li>
+    <span class="icon-box icon-box-sm icon-box-soft">${icon("quiz")}</span>
+    <span class="device-main"><strong><a href="/admin/attempts/${String(g.id)}">${g.student}</a></strong><small>${g.quiz} · ${when(g.submitted_at)}</small></span>
+  </li>`,
+  )}</ul>
+</section>`
+    : ""
+}
 ${
   d.ending.length
     ? html`<section class="section" aria-labelledby="ending-title">

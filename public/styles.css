@@ -569,3 +569,76 @@ select.input { appearance: none; padding-inline-end: 44px; background-image: url
 .settings-form > .btn { justify-self: start; }
 .program-card .pill-wrap { margin-top: 6px; }
 .program-card .btn-block + .btn-block, .program-card .pill + .btn-block, .program-card .pill + .profile-form { margin-top: 8px; }
+
+/* ---------- المرحلة 6: الاختبارات ---------- */
+.math { unicode-bidi: isolate; }
+.math-display { display: block; margin: 10px 0; overflow-x: auto; overflow-y: hidden; }
+.katex { font-size: 1.1em; }
+.actions-tight { margin-top: 0; }
+
+.q-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.q-card { padding: 16px 18px; }
+.q-card fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.q-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; padding: 0; }
+.q-head .unit-num { width: 36px; height: 36px; border-radius: 12px; font-size: 15px; }
+.q-head .score-chip { margin-inline-start: auto; }
+.q-text { font-size: 17px; line-height: 1.9; overflow-wrap: anywhere; }
+.q-choices { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.q-choices li { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.q-choices .q-correct { border-color: var(--success-ink); background: color-mix(in srgb, var(--success-ink) 8%, transparent); font-weight: 700; }
+.q-key, .q-given, .q-note { margin: 10px 0 0; line-height: 1.8; }
+.q-note { display: flex; gap: 6px; align-items: flex-start; color: var(--ink-2); }
+.q-actions { margin-top: 12px; padding-inline-start: 0; }
+.q-right { box-shadow: inset 4px 0 0 var(--success-ink), var(--shadow); }
+.q-wrong { box-shadow: inset 4px 0 0 var(--danger-ink), var(--shadow); }
+.q-partial, .q-pending { box-shadow: inset 4px 0 0 var(--brand-strong), var(--shadow); }
+.open-answer { white-space: pre-line; }
+.add-q { margin-top: 14px; }
+.add-q h3 { margin: 0 0 10px; font-size: 17px; }
+.type-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+.score-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 10px; border-radius: var(--radius-pill); background: var(--surface-2); border: 1px solid var(--line); font-weight: 800; font-size: 15px; white-space: nowrap; }
+
+.math-toolbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-2); }
+.tool { min-width: 44px; min-height: 40px; padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; font-size: 16px; cursor: pointer; }
+.tool:hover { border-color: var(--ink-3); }
+.math-preview { min-height: 0; padding: 8px 12px; border-radius: 12px; background: var(--brand-soft); color: var(--ink); line-height: 2; overflow-x: auto; }
+.math-preview:empty { display: none; }
+.math-preview-block { margin-top: 8px; }
+.preview-error { background: var(--danger-soft); color: var(--danger-ink); font-size: 14px; }
+.choices-field { border: 0; padding: 0; margin: 0; min-width: 0; }
+.choices-field legend, fieldset > legend { font-weight: 700; font-size: 15px; margin-bottom: 8px; padding: 0; }
+.choice-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 10px; margin-bottom: 8px; }
+.choice-row .math-preview { grid-column: 2; }
+.choice-mark input { width: 22px; height: 22px; accent-color: var(--brand-strong); }
+.tf-row { display: flex; gap: 24px; }
+.grade-row { display: grid; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--line); }
+@media (min-width: 720px) { .grade-row { grid-template-columns: 200px 1fr; } }
+
+.quiz-facts { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--ink-2); font-size: 15px; }
+.quiz-facts li { display: inline-flex; align-items: center; gap: 6px; }
+.quiz-instructions { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); line-height: 1.9; }
+
+.quiz-bar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: -4px 0 14px; padding: 10px 14px; border-radius: 16px; background: var(--ink); color: var(--bg); }
+.quiz-bar strong { flex: 1; min-width: 8em; }
+.timer { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: var(--radius-pill); background: #FBBF24; color: #16181D; font-weight: 800; font-variant-numeric: tabular-nums; }
+.timer-warn { background: #FCA5A5; }
+.save-state { flex-basis: 100%; font-size: 13px; opacity: .85; }
+.save-state:empty { display: none; }
+.options { display: grid; gap: 8px; margin-top: 12px; }
+.options-row { grid-template-columns: 1fr 1fr; }
+.option { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 14px; border: 1.5px solid var(--line); border-radius: 14px; cursor: pointer; transition: border-color 150ms ease-out, background-color 150ms ease-out; }
+.option input { width: 22px; height: 22px; flex: none; accent-color: var(--brand-strong); }
+.option:has(input:checked) { border-color: var(--brand-strong); background: var(--brand-soft); }
+.option:has(input:focus-visible) { outline: 3px solid var(--brand-strong); outline-offset: 2px; }
+.expr-field { margin-top: 12px; display: grid; gap: 8px; }
+.expr-input { font-size: 18px; letter-spacing: .02em; text-align: left; }
+.keypad { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 6px; }
+@media (max-width: 520px) { .keypad { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.key { min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--ink); font: inherit; font-size: 17px; font-weight: 700; cursor: pointer; direction: ltr; }
+.key:active { background: var(--brand-soft); }
+.key-del { background: var(--surface); }
+.submit-card { margin-top: 16px; text-align: center; }
+.submit-card .btn { margin: 6px 0; }
+.result-hero { text-align: center; }
+.big-score { margin: 10px 0 0; font-size: 56px; font-weight: 800; line-height: 1; }
+.big-score small { font-size: 22px; color: var(--label); }

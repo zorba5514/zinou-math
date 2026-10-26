@@ -3,6 +3,7 @@
 import { audit, type D1Database, type D1PreparedStatement } from "./db.ts";
 import { field, page, readForm, readUpload, redirect } from "./http.ts";
 import { randomToken } from "./crypto.ts";
+import { deleteQuizzes } from "./quiz.ts";
 import { getProgram, listPrograms, programUnits, type Lesson, type Program, type Unit } from "./content.ts";
 import { contentHomePage, lessonAdminPage, programAdminPage, unitAdminPage } from "./content-admin-pages.ts";
 import { PLAYLIST_ERRORS, parsePlaylistId, parseVideoId, playlistVideos, videoTitle, type PlaylistVideo } from "./youtube.ts";
@@ -56,6 +57,7 @@ export async function handleContentRoutes(ctx: Ctx): Promise<Response | null> {
       if (action === "videos") return pasteVideos(ctx, program, unit);
       if (action === "publish-all") return publishAll(ctx, unit);
       if (action === "pdf") return uploadPdf(ctx, program, unit);
+      if (action === "quiz") return addQuiz(ctx, program, unit);
     }
     return notFound(ctx);
   }
@@ -238,6 +240,8 @@ async function deleteUnit(ctx: Ctx, program: Program, unit: Unit): Promise<Respo
   if (form.get("confirm") !== "1") return showUnit(ctx, program, unit, { errors: { form: "ضع علامة على «أؤكد الحذف» لحذف المقطع." } }, 400);
   const db = ctx.env.DB;
   const files = await db.prepare("SELECT file_key FROM lessons WHERE unit_id = ? AND file_key IS NOT NULL").bind(unit.id).all<{ file_key: string }>();
+  const quizzes = await db.prepare("SELECT quiz_id FROM lessons WHERE unit_id = ? AND quiz_id IS NOT NULL").bind(unit.id).all<{ quiz_id: number }>();
+  await deleteQuizzes(db, ctx.env.FILES, quizzes.results.map((q) => q.quiz_id));
   await db.batch([db.prepare("DELETE FROM lessons WHERE unit_id = ?").bind(unit.id), db.prepare("DELETE FROM units WHERE id = ?").bind(unit.id)]);
   if (files.results.length && ctx.env.FILES) await ctx.env.FILES.delete(files.results.map((f) => f.file_key));
   await audit(db, adminId(ctx), "unit.deleted", `unit:${unit.id}`, unit.title);
@@ -417,6 +421,7 @@ async function moveLesson(ctx: Ctx, lesson: Lesson): Promise<Response> {
 async function deleteLesson(ctx: Ctx, lesson: Lesson): Promise<Response> {
   const form = await readForm(ctx.request);
   if (form.get("confirm") !== "1") return redirect(`/admin/lessons/${lesson.id}`);
+  if (lesson.quiz_id) await deleteQuizzes(ctx.env.DB, ctx.env.FILES, [lesson.quiz_id]);
   await ctx.env.DB.prepare("DELETE FROM lessons WHERE id = ?").bind(lesson.id).run();
   if (lesson.file_key && ctx.env.FILES) await ctx.env.FILES.delete(lesson.file_key);
   await audit(ctx.env.DB, adminId(ctx), "lesson.deleted", `lesson:${lesson.id}`, lesson.title);
@@ -455,4 +460,22 @@ async function uploadPdf(ctx: Ctx, program: Program, unit: Unit): Promise<Respon
     .run();
   await audit(db, adminId(ctx), "pdf.uploaded", `unit:${unit.id}`, title);
   return redirect(`/admin/units/${unit.id}?done=lesson-added`);
+}
+
+// ---------- الاختبارات ----------
+
+async function addQuiz(ctx: Ctx, program: Program, unit: Unit): Promise<Response> {
+  const db = ctx.env.DB;
+  const form = await readForm(ctx.request);
+  const title = field(form, "title");
+  if (!validTitle(title, 200)) return showUnit(ctx, program, unit, { errors: { quiz: "اكتب عنوان الاختبار." }, values: { quiz_title: title } }, 400);
+  const quiz = await db.prepare("INSERT INTO quizzes (created_at, updated_at) VALUES (?, ?)").bind(ctx.now, ctx.now).run();
+  const quizId = Number(quiz.meta.last_row_id);
+  const pos = await db.prepare("SELECT COALESCE(MAX(position), 0) + 1 AS n FROM lessons WHERE unit_id = ?").bind(unit.id).first<{ n: number }>();
+  await db
+    .prepare("INSERT INTO lessons (unit_id, kind, title, position, free, status, quiz_id, created_at, updated_at) VALUES (?, 'quiz', ?, ?, 0, 'draft', ?, ?, ?)")
+    .bind(unit.id, title, pos?.n ?? 1, quizId, ctx.now, ctx.now)
+    .run();
+  await audit(db, adminId(ctx), "quiz.added", `unit:${unit.id}`, title);
+  return redirect(`/admin/quizzes/${quizId}?done=quiz-added`);
 }

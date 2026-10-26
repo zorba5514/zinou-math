@@ -9,6 +9,8 @@ import type { Account, Device, Student } from "./db.ts";
 import type { ProgramSummary } from "./content.ts";
 import { statusLabel, subscriptionStatus, type SubStatus, type Subscription } from "./subscriptions.ts";
 import { whatsappNumber } from "./phone.ts";
+import { on20, visibility, type RecentResult } from "./quiz.ts";
+import { formatDate } from "./subscriptions.ts";
 
 function initial(name: string): string {
   return name.trim().charAt(0) || "؟";
@@ -99,9 +101,21 @@ export function whatsappLink(phone: string | undefined, message: string): string
   return phone ? `https://wa.me/${whatsappNumber(phone)}?text=${encodeURIComponent(message)}` : null;
 }
 
+// ---------- النتائج ----------
+
+function resultsList(rows: RecentResult[], withName = false): Raw {
+  return html`<ol class="card admin-list results-list">${rows.map((r) => {
+    const vis = visibility(r, r);
+    return html`<li>
+      <a class="admin-list-main" href="/attempts/${String(r.id)}"><strong>${withName ? html`${r.student} · ` : ""}${r.title}</strong><small>${r.submitted_at ? formatDate(r.submitted_at) : ""}${r.status === "submitted" ? " · بانتظار تصحيح الأستاذ" : ""}</small></a>
+      ${vis.score ? html`<span class="score-chip"><bdi dir="ltr">${on20(r.score, r.max_score)}/20</bdi></span>` : html`<span class="pill pill-muted">لم تُنشر بعد</span>`}
+    </li>`;
+  })}</ol>`;
+}
+
 // ---------- صفحة الابن ----------
 
-export function studentHomePage(view: View, student: Student, status: SubStatus): string {
+export function studentHomePage(view: View, student: Student, status: SubStatus, results: RecentResult[] = []): string {
   const program = LEVELS.find((l) => l.slug === student.level);
   return layout({
     title: student.name,
@@ -116,7 +130,8 @@ export function studentHomePage(view: View, student: Student, status: SubStatus)
     ${program ? html`<a class="btn btn-primary" href="/levels/${program.slug}">دروس ${program.short} ${icon("arrowLeft")}</a>` : ""}
     <a class="btn btn-secondary" href="/profiles">${icon("users")}تبديل الملف</a>
   </div>
-</section>`,
+</section>
+${results.length ? html`<section class="section" aria-labelledby="res-title"><h2 id="res-title">نتائجي الأخيرة</h2>${resultsList(results)}</section>` : ""}`,
   });
 }
 
@@ -130,6 +145,7 @@ function deviceStatusPill(d: Device): Raw {
 
 export interface ParentExtras {
   subs: Subscription[];
+  results: RecentResult[];
   /** الدورات المنشورة التي لا يشترك فيها أي ابن حاليًا */
   courses: ProgramSummary[];
   whatsapp?: string;
@@ -177,6 +193,11 @@ export function parentPage(view: View, account: Account, students: Student[], de
       : html`<div class="card empty"><p>لم يُضف أي ابن إلى هذا الحساب بعد. تواصل مع الأستاذ لإضافته.</p></div>`
   }
 </section>
+${
+  x.results.length
+    ? html`<section class="section" aria-labelledby="res-title"><h2 id="res-title">نتائج الاختبارات</h2>${resultsList(x.results, students.length > 1)}</section>`
+    : ""
+}
 ${
   x.courses.length && students.length
     ? html`<section class="section" aria-labelledby="rec-title">

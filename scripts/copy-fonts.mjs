@@ -1,5 +1,6 @@
-// ينسخ ملفات الخطوط العربية من حزم Fontsource إلى public/fonts قبل النشر.
-// الخطوط لا تُحفظ في المستودع، بل تُجلب عند كل نشر بنفس الإصدار.
+// ينسخ ملفات الخطوط العربية من حزم Fontsource إلى public/fonts قبل النشر،
+// وملفات KaTeX (عرض الكتابة الرياضية: التنسيق والخطوط وكود المعاينة) إلى public/katex.
+// هذه الملفات لا تُحفظ في المستودع، بل تُجلب عند كل نشر بنفس الإصدار.
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -28,6 +29,18 @@ for (const font of FONTS) {
   copyFileSync(src, join(OUT, font.out));
   console.log(`${font.out} ← ${font.pkg}`);
 }
+// KaTeX: التنسيق، وخطوط woff2 فقط (كل المتصفحات الحديثة تدعمها)، وكود المعاينة في المتصفح
+const KATEX = join("node_modules", "katex", "dist");
+if (!existsSync(KATEX)) {
+  missing.push("حزمة katex غير مثبتة");
+} else {
+  mkdirSync("public/katex/fonts", { recursive: true });
+  for (const file of ["katex.min.css", "katex.min.js"]) copyFileSync(join(KATEX, file), join("public/katex", file));
+  const fonts = readdirSync(join(KATEX, "fonts")).filter((f) => f.endsWith(".woff2"));
+  for (const f of fonts) copyFileSync(join(KATEX, "fonts", f), join("public/katex/fonts", f));
+  console.log(`KaTeX: التنسيق والكود و${fonts.length} خطًا`);
+}
+
 if (missing.length) {
   console.log(`::error title=الخطوط::${missing.join("%0A")}`);
   process.exit(1);

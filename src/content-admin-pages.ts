@@ -164,6 +164,7 @@ function lessonRow(l: Lesson, i: number, count: number): Raw {
     ${moveButtons(base, i === 0, i === count - 1)}
     ${postButton(`${base}/free`, l.free ? "اجعله مدفوعًا" : "اجعله مجانيًا", "btn btn-secondary btn-xs")}
     ${postButton(`${base}/status`, l.status === "draft" ? "نشر" : "إخفاء", l.status === "draft" ? "btn btn-primary btn-xs" : "btn btn-secondary btn-xs")}
+    ${l.quiz_id ? html`<a class="btn btn-secondary btn-xs" href="/admin/quizzes/${String(l.quiz_id)}">${icon("pencil", "icon icon-sm")}الأسئلة</a>` : ""}
   </span>
 </li>`;
 }
@@ -237,12 +238,21 @@ ${alertBox(e.form)}
     o.hasFiles
       ? html`<form method="post" action="/admin/units/${id}/pdf" enctype="multipart/form-data" class="form" novalidate>
     <div class="field"><label for="f-file">الملف (حتى 20 ميغابايت)</label><input id="f-file" class="input input-file" type="file" name="file" accept="application/pdf,.pdf" required></div>
-    ${input({ name: "title", label: "العنوان (اختياري)", value: o.values?.pdf_title, maxlength: 200, hint: "إن تركته فارغًا يُستعمل اسم الملف." })}
+    ${input({ name: "title", id: "f-pdf-title", label: "العنوان (اختياري)", value: o.values?.pdf_title, maxlength: 200, hint: "إن تركته فارغًا يُستعمل اسم الملف." })}
     ${select({ name: "file_mode", label: "طريقة الإتاحة", options: FILE_MODE_OPTIONS, value: o.values?.file_mode ?? "both" })}
     <button class="btn btn-primary btn-sm" type="submit">${icon("upload")}رفع</button>
   </form>`
       : alertBox("مخزن الملفات (R2) غير مفعّل بعد في حساب Cloudflare. بعد تفعيله يظهر هنا نموذج الرفع.", "info")
   }
+</section>
+
+<section class="card form-card" aria-labelledby="quiz-title">
+  <h2 id="quiz-title">${icon("quiz")} إضافة اختبار أو فرض</h2>
+  ${alertBox(e.quiz)}
+  <form method="post" action="/admin/units/${id}/quiz" class="form" novalidate>
+    ${input({ name: "title", id: "f-quiz-title", label: "العنوان", value: o.values?.quiz_title, required: true, maxlength: 200, hint: "مثال: فرض المقطع 1، أو تمارين الكسور. بعدها تضيف الأسئلة." })}
+    <button class="btn btn-primary btn-sm" type="submit">${icon("plus")}إنشاء</button>
+  </form>
 </section>
 
 <section class="card form-card" aria-labelledby="paste-title">

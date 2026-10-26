@@ -9,6 +9,7 @@ import { currentSession } from "./auth.ts";
 import { handleAuthRoutes, type Ctx } from "./auth-routes.ts";
 import { handleAdminRoutes } from "./admin-routes.ts";
 import { handleFamilyRoutes } from "./family-routes.ts";
+import { handleQuizRoutes, quizIntro } from "./quiz-routes.ts";
 import { messagePage } from "./auth-pages.ts";
 import { SECURITY_HEADERS, isSameOrigin, json, page, redirect, type Env } from "./http.ts";
 import type { View, Viewer } from "./ui.ts";
@@ -29,6 +30,8 @@ export const SPECULATION_RULES = {
           { not: { href_matches: "/profiles*" } },
           { not: { href_matches: "/home" } },
           { not: { href_matches: "/files/*" } },
+          { not: { href_matches: "/attempts/*" } },
+          { not: { href_matches: "/quizzes/*" } },
           { not: { href_matches: "/login*" } },
           { not: { href_matches: "/setup" } },
         ],
@@ -78,6 +81,7 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
     if (!found || (!isPublished(found) && !isAdmin)) return page(notFoundPage(view), 404);
     // المدفوع لا يُعرض أبدًا لمن لا يحق له: يُحوَّل إلى صفحة الاشتراك، ولا يصل إليه معرّف الفيديو
     if (!mayOpen(ctx, found)) return redirect(`/subscribe?lesson=${found.lesson.id}`, [], 302);
+    if (found.lesson.kind === "quiz") return quizIntro(ctx, found);
     const next = await db
       .prepare(
         `SELECT * FROM lessons WHERE unit_id = ? AND (position > ? OR (position = ? AND id > ?)) ${isAdmin ? "" : "AND status = 'published'"}
@@ -175,7 +179,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const ctx: Ctx = { request, env, url, path, method, now, current, user, view };
 
   const accountArea =
-    path.startsWith("/admin") || path === "/account" || path.startsWith("/account/") || path === "/home" || path === "/profiles" || path.startsWith("/profiles/");
+    path.startsWith("/admin") || path === "/account" || path.startsWith("/account/") || path === "/home" || path === "/profiles" || path.startsWith("/profiles/") || path.startsWith("/attempts/") || path.startsWith("/quizzes/");
   // من يدخل بكلمة مرور مؤقتة يجب أن يغيّرها قبل أي شيء آخر في حسابه
   if (user?.account.must_change_password && accountArea && path !== "/account/password") {
     return redirect("/account/password");
@@ -185,7 +189,7 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     return redirect("/home");
   }
 
-  const routed = (await handleAuthRoutes(ctx)) ?? (await handleAdminRoutes(ctx)) ?? (await handleFamilyRoutes(ctx));
+  const routed = (await handleAuthRoutes(ctx)) ?? (await handleAdminRoutes(ctx)) ?? (await handleFamilyRoutes(ctx)) ?? (await handleQuizRoutes(ctx));
   if (routed) return routed;
 
   if (method === "POST") return page(notFoundPage(view), 404);

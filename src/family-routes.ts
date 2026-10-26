@@ -12,6 +12,7 @@ import { hashPassword, verifyPassword } from "./crypto.ts";
 import { field, page, readForm, redirect } from "./http.ts";
 import { listPrograms } from "./content.ts";
 import { getSettings, subscriptionStatus, type Subscription } from "./subscriptions.ts";
+import { recentResults } from "./quiz.ts";
 import { parentPage, pinsPage, profilesPage, studentHomePage, unlockPage, type PinProfile } from "./family-pages.ts";
 import type { Ctx } from "./auth-routes.ts";
 
@@ -171,7 +172,8 @@ async function getStudentHome(ctx: Ctx): Promise<Response> {
     return redirect("/profiles");
   }
   const subs = await ctx.env.DB.prepare("SELECT * FROM subscriptions WHERE student_id = ?").bind(target.student!.id).all<Subscription>();
-  return page(studentHomePage(ctx.view, target.student!, subscriptionStatus(subs.results, target.student!.level, ctx.now)));
+  const results = await recentResults(ctx.env.DB, [target.student!.id], 8);
+  return page(studentHomePage(ctx.view, target.student!, subscriptionStatus(subs.results, target.student!.level, ctx.now), results));
 }
 
 function requireParentProfile(ctx: Ctx): Response | null {
@@ -203,7 +205,7 @@ async function getParent(ctx: Ctx): Promise<Response> {
   const courses = (await listPrograms(ctx.env.DB)).filter((p) => p.kind === "course" && p.lessons > 0 && !held(p.slug));
   const settings = await getSettings(ctx.env.DB);
   return page(
-    parentPage(ctx.view, account, students, devices.results, { subs: subs.results, courses, whatsapp: settings.whatsapp, now: ctx.now }),
+    parentPage(ctx.view, account, students, devices.results, { subs: subs.results, results: await recentResults(ctx.env.DB, students.map((st) => st.id), 10), courses, whatsapp: settings.whatsapp, now: ctx.now }),
   );
 }
 

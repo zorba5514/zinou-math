@@ -21,7 +21,7 @@ export function isLevel(slug: string): boolean {
 
 export type ProgramIcon = "level" | "calculator" | "trophy";
 export type Status = "draft" | "published";
-export type LessonKind = "video" | "pdf";
+export type LessonKind = "video" | "pdf" | "quiz";
 export type FileMode = "view" | "download" | "both";
 
 export interface Program {
@@ -66,6 +66,7 @@ export interface Lesson {
   file_name: string | null;
   file_size: number | null;
   file_mode: FileMode | null;
+  quiz_id: number | null;
   published_at: number | null;
   created_at: number;
   updated_at: number;
@@ -75,7 +76,7 @@ export interface UnitWithLessons extends Unit {
   lessons: Lesson[];
 }
 
-export const KIND_LABELS: Record<LessonKind, string> = { video: "فيديو", pdf: "ملف PDF" };
+export const KIND_LABELS: Record<LessonKind, string> = { video: "فيديو", pdf: "ملف PDF", quiz: "اختبار" };
 
 /** اسم الجزء حسب النوع: «مقطع» في المستويات و«جزء» في الدورات. */
 export function unitWord(program: Pick<Program, "kind">, plural = false): string {

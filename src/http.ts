@@ -30,6 +30,8 @@ export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
 /** سياسة المحتوى للصفحات: لا كود ولا تنسيق إلا من موقعنا. */
 export const PAGE_CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; " +
+  // KaTeX يضبط مقاسات الصيغ بخاصية style داخل العناصر؛ لا يُسمح بأي وسم <style> ولا كود
+  "style-src-attr 'unsafe-inline'; " +
   "frame-src https://www.youtube-nocookie.com; " +
   "object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
