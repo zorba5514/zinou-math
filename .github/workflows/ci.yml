@@ -134,6 +134,9 @@ jobs:
               && echo "$page" | grep -q '<html lang="ar" dir="rtl">' \
               && curl -fsS -o /dev/null "$URL/fonts/tajawal-ar-400.woff2" \
               && curl -fsS -o /dev/null "$URL/fonts/tajawal-ar-800.woff2" \
+              && curl -fsS -o /dev/null "$URL/katex/katex.min.css" \
+              && curl -fsS -o /dev/null "$URL/katex/fonts/KaTeX_Main-Regular.woff2" \
+              && curl -fsS -o /dev/null "$URL/mathexpr.js" \
               && curl -fsS -o /dev/null "$URL/app.js" \
               && curl -fsS -o login.html "$URL/login" && grep -q 'name="password"' login.html \
               && [ "$(curl -sS -o /dev/null -w '%{http_code}' "$URL/admin")" = "303" ]; then
