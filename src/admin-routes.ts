@@ -1,6 +1,8 @@
 // مسارات لوحة تحكم الأستاذ.
 
 import { audit, type Account, type Device, type Student } from "./db.ts";
+import { getSettings, computeEnd, ENDING_SOON_DAYS, type SubKind, type Subscription } from "./subscriptions.ts";
+import type { Program } from "./content.ts";
 import { endOtherSessions, passwordIterations } from "./auth.ts";
 import { hashPassword, temporaryPassword } from "./crypto.ts";
 import { field, page, readForm, redirect } from "./http.ts";
@@ -16,9 +18,11 @@ import {
   type FamilyRow,
   type NewFamilyValues,
   type PendingDevice,
+  type EndingSoon,
 } from "./admin-pages.ts";
 import { notFoundPage } from "./pages.ts";
 import { handleContentRoutes } from "./content-admin-routes.ts";
+import { handleSettings } from "./settings-admin.ts";
 import type { Ctx } from "./auth-routes.ts";
 
 function validName(name: string): boolean {
@@ -36,7 +40,7 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
   // غير الأستاذ لا يرى حتى وجود هذه الصفحات
   if (ctx.user.account.role !== "admin") return page(notFoundPage(ctx.view), 404);
 
-  const content = await handleContentRoutes(ctx);
+  const content = (await handleContentRoutes(ctx)) ?? (await handleSettings(ctx));
   if (content) return content;
 
   if (path === "/admin" && method === "GET") return dashboard(ctx);
@@ -65,6 +69,11 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
 
   const kid = /^\/admin\/students\/(\d+)\/edit$/.exec(path);
   if (kid && method === "POST") return editStudent(ctx, Number(kid[1]));
+
+  const activate = /^\/admin\/students\/(\d+)\/subscriptions$/.exec(path);
+  if (activate && method === "POST") return activateSubscription(ctx, Number(activate[1]));
+  const removeSub = /^\/admin\/subscriptions\/(\d+)\/delete$/.exec(path);
+  if (removeSub && method === "POST") return deleteSubscription(ctx, Number(removeSub[1]));
 
   return page(notFoundPage(ctx.view), 404);
 }
@@ -112,6 +121,7 @@ async function dashboard(ctx: Ctx): Promise<Response> {
           )
           .all<PendingDevice>()
       ).results,
+      ending: await endingSoon(ctx),
       recent: recent.results,
     }),
   );
@@ -212,6 +222,8 @@ async function createFamily(ctx: Ctx): Promise<Response> {
 // ---------- صفحة العائلة وإجراءاتها ----------
 
 const DONE_KEYS = new Set([
+  "sub-activated",
+  "sub-deleted",
   "edit",
   "child",
   "child-edit",
@@ -223,6 +235,21 @@ const DONE_KEYS = new Set([
   "devices-reset",
   "pins-cleared",
 ]);
+
+async function familyData(ctx: Ctx, accountId: number) {
+  const db = ctx.env.DB;
+  const subs = await db
+    .prepare("SELECT s.* FROM subscriptions s JOIN students st ON st.id = s.student_id WHERE st.account_id = ? ORDER BY s.ends_at DESC, s.id DESC")
+    .bind(accountId)
+    .all<Subscription>();
+  const programs = await db.prepare("SELECT * FROM programs ORDER BY position, slug").all<Program>();
+  return {
+    students: await loadStudents(ctx, accountId),
+    devices: await loadDevices(ctx, accountId),
+    subs: subs.results,
+    programs: programs.results,
+  };
+}
 
 async function loadDevices(ctx: Ctx, accountId: number): Promise<Device[]> {
   const r = await ctx.env.DB
@@ -237,8 +264,7 @@ async function showFamily(ctx: Ctx, account: Account): Promise<Response> {
   return page(
     familyPage(ctx.view, {
       account,
-      students: await loadStudents(ctx, account.id),
-      devices: await loadDevices(ctx, account.id),
+      ...(await familyData(ctx, account.id)),
       now: ctx.now,
       done: done && DONE_KEYS.has(done) ? done : null,
     }),
@@ -256,7 +282,7 @@ async function editFamily(ctx: Ctx, account: Account): Promise<Response> {
     errors.phone = "هذا الرقم مسجل لحساب آخر.";
   }
   if (Object.keys(errors).length || !phone) {
-    return page(familyPage(ctx.view, { account, students: await loadStudents(ctx, account.id), devices: await loadDevices(ctx, account.id), now: ctx.now, errors, values }), 400);
+    return page(familyPage(ctx.view, { account, ...(await familyData(ctx, account.id)), now: ctx.now, errors, values }), 400);
   }
   await ctx.env.DB
     .prepare("UPDATE accounts SET name = ?, phone = ?, note = ?, updated_at = ? WHERE id = ?")
@@ -273,7 +299,7 @@ async function addChild(ctx: Ctx, account: Account): Promise<Response> {
   if (!validName(values.child_name)) errors.child_name = "اكتب اسم الابن.";
   if (!validLevel(values.child_level)) errors.child_level = "اختر المستوى.";
   if (Object.keys(errors).length) {
-    return page(familyPage(ctx.view, { account, students: await loadStudents(ctx, account.id), devices: await loadDevices(ctx, account.id), now: ctx.now, errors, values }), 400);
+    return page(familyPage(ctx.view, { account, ...(await familyData(ctx, account.id)), now: ctx.now, errors, values }), 400);
   }
   await ctx.env.DB
     .prepare("INSERT INTO students (account_id, name, level, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
@@ -375,4 +401,66 @@ async function clearPins(ctx: Ctx, account: Account): Promise<Response> {
   ]);
   await audit(db, adminId(ctx), "pins.cleared", `account:${account.id}`);
   return redirect(`/admin/families/${account.id}?done=pins-cleared`);
+}
+
+// ---------- الاشتراكات ----------
+
+async function activateSubscription(ctx: Ctx, studentId: number): Promise<Response> {
+  const db = ctx.env.DB;
+  const student = await db
+    .prepare("SELECT s.* FROM students s JOIN accounts a ON a.id = s.account_id WHERE s.id = ? AND a.role = 'parent'")
+    .bind(studentId)
+    .first<Student>();
+  if (!student) return page(notFoundPage(ctx.view), 404);
+  const account = await loadFamily(ctx, student.account_id);
+  if (!account) return page(notFoundPage(ctx.view), 404);
+  const form = await readForm(ctx.request);
+  // الباقة بصيغة «المستوى:النوع»، مثل 2am:term1 أو olympiad:course
+  const [slug = "", kindText = ""] = field(form, "package").split(":");
+  const note = field(form, "note").slice(0, 200);
+  const program = await db.prepare("SELECT * FROM programs WHERE slug = ?").bind(slug).first<Program>();
+  const validKind = program?.kind === "course" ? kindText === "course" : ["term1", "term2", "term3", "year"].includes(kindText);
+  const fail = async (message: string) =>
+    page(familyPage(ctx.view, { account, ...(await familyData(ctx, account.id)), now: ctx.now, errors: { [`sub_${studentId}`]: message } }), 400);
+  if (!program || !validKind) return fail("اختر الباقة.");
+  const kind = kindText as SubKind;
+  const end = computeEnd(kind, await getSettings(db), ctx.now);
+  if (!end.ok) return fail(end.error);
+  await db
+    .prepare("INSERT INTO subscriptions (student_id, program_slug, kind, starts_at, ends_at, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(studentId, program.slug, kind, ctx.now, end.endsAt, note || null, adminId(ctx), ctx.now)
+    .run();
+  await audit(db, adminId(ctx), "subscription.activated", `account:${account.id}`, `${student.name} · ${program.title}`);
+  return redirect(`/admin/families/${account.id}?done=sub-activated#subs`);
+}
+
+async function deleteSubscription(ctx: Ctx, id: number): Promise<Response> {
+  const db = ctx.env.DB;
+  const sub = await db
+    .prepare("SELECT s.*, st.account_id, st.name FROM subscriptions s JOIN students st ON st.id = s.student_id WHERE s.id = ?")
+    .bind(id)
+    .first<Subscription & { account_id: number; name: string }>();
+  if (!sub) return page(notFoundPage(ctx.view), 404);
+  const form = await readForm(ctx.request);
+  if (form.get("confirm") !== "1") return redirect(`/admin/families/${sub.account_id}#subs`);
+  await db.prepare("DELETE FROM subscriptions WHERE id = ?").bind(id).run();
+  await audit(db, adminId(ctx), "subscription.deleted", `account:${sub.account_id}`, `${sub.name} · ${sub.program_slug}`);
+  return redirect(`/admin/families/${sub.account_id}?done=sub-deleted#subs`);
+}
+
+export async function endingSoon(ctx: Ctx) {
+  const r = await ctx.env.DB
+    .prepare(
+      `SELECT s.id, s.kind, s.ends_at, s.program_slug, st.name AS student, st.account_id, a.name AS parent, p.title AS program
+       FROM subscriptions s
+       JOIN students st ON st.id = s.student_id AND st.status = 'active'
+       JOIN accounts a ON a.id = st.account_id AND a.status = 'active'
+       JOIN programs p ON p.slug = s.program_slug
+       WHERE s.ends_at BETWEEN ? AND ?
+         AND NOT EXISTS (SELECT 1 FROM subscriptions n WHERE n.student_id = s.student_id AND n.program_slug = s.program_slug AND n.ends_at > s.ends_at)
+       ORDER BY s.ends_at LIMIT 100`,
+    )
+    .bind(ctx.now, ctx.now + ENDING_SOON_DAYS * 24 * 60 * 60 * 1000)
+    .all<EndingSoon>();
+  return r.results;
 }

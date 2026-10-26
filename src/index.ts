@@ -2,7 +2,8 @@
 // الملفات الثابتة (الشعار، التنسيق) تقدّمها Cloudflare مباشرة من مجلد public.
 // كل طلب آخر يصل إلى هنا: الصفحات تُبنى في الخادم، وطلبات /api/* للبيانات.
 
-import { canOpen, getLesson, getProgram, isPublished, listPrograms, programUnits, type Lesson } from "./content.ts";
+import { getLesson, getProgram, isPublished, listPrograms, programUnits, type Lesson, type LessonContext } from "./content.ts";
+import { NO_ACCESS, canOpen, getSettings, loadAccess, visibleSince } from "./subscriptions.ts";
 import { homePage, lessonPage, levelsPage, notFoundPage, programPage, subscribePage } from "./pages.ts";
 import { currentSession } from "./auth.ts";
 import { handleAuthRoutes, type Ctx } from "./auth-routes.ts";
@@ -63,7 +64,7 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
     const id = url.searchParams.get("lesson") ?? "";
     const found = /^\d{1,12}$/.test(id) ? await getLesson(db, Number(id)) : null;
     const locked = found && isPublished(found) && !found.lesson.free ? { program: found.program, lesson: found.lesson } : undefined;
-    return page(subscribePage(view, locked));
+    return page(subscribePage(view, await getSettings(db), locked));
   }
   const programMatch = /^\/levels\/([a-z0-9-]+)$/.exec(path);
   if (programMatch) {
@@ -76,7 +77,7 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
     const found = await getLesson(db, Number(lessonMatch[1]));
     if (!found || (!isPublished(found) && !isAdmin)) return page(notFoundPage(view), 404);
     // المدفوع لا يُعرض أبدًا لمن لا يحق له: يُحوَّل إلى صفحة الاشتراك، ولا يصل إليه معرّف الفيديو
-    if (!canOpen(view.viewer, found.lesson)) return redirect(`/subscribe?lesson=${found.lesson.id}`, [], 302);
+    if (!mayOpen(ctx, found)) return redirect(`/subscribe?lesson=${found.lesson.id}`, [], 302);
     const next = await db
       .prepare(
         `SELECT * FROM lessons WHERE unit_id = ? AND (position > ? OR (position = ? AND id > ?)) ${isAdmin ? "" : "AND status = 'published'"}
@@ -91,6 +92,10 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
   return null;
 }
 
+function mayOpen(ctx: Ctx, c: LessonContext): boolean {
+  return canOpen(ctx.view.access ?? NO_ACCESS, { free: c.lesson.free, program_slug: c.program.slug, visible_since: visibleSince(c.lesson, c.unit) });
+}
+
 /** ملف PDF لدرس: نفس قواعد الدرس (منشور، ومن يحق له)، وحسب طريقة الإتاحة التي اختارها الأستاذ. */
 async function serveFile(ctx: Ctx, id: number): Promise<Response> {
   const { view } = ctx;
@@ -99,7 +104,7 @@ async function serveFile(ctx: Ctx, id: number): Promise<Response> {
   if (!found || found.lesson.kind !== "pdf" || !found.lesson.file_key || (!isPublished(found) && !isAdmin)) {
     return page(notFoundPage(view), 404);
   }
-  if (!canOpen(view.viewer, found.lesson)) return redirect(`/subscribe?lesson=${id}`, [], 302);
+  if (!mayOpen(ctx, found)) return redirect(`/subscribe?lesson=${id}`, [], 302);
   const download = ctx.url.searchParams.get("download") === "1";
   const mode = found.lesson.file_mode ?? "both";
   if ((download && mode === "view") || (!download && mode === "download")) return page(notFoundPage(view), 404);
@@ -152,7 +157,16 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
       if (student) viewer = { ...viewer, name: student.name, profile: "student" };
     }
   }
-  const view: View = { env: env.APP_ENV, viewer };
+  // ما يحق لمن يتصفح فتحه: الأستاذ كل شيء، والابن اشتراكاته، والولي اشتراكات كل أبنائه
+  let access = { ...NO_ACCESS, now };
+  if (user?.account.role === "admin") access = { all: true, subs: [], now };
+  else if (user && viewer?.profile === "student" && user.session.student_id !== null) {
+    access = await loadAccess(env.DB, [user.session.student_id], now);
+  } else if (user && viewer?.profile === "parent") {
+    const kids = await env.DB.prepare("SELECT id FROM students WHERE account_id = ? AND status = 'active'").bind(user.account.id).all<{ id: number }>();
+    access = await loadAccess(env.DB, kids.results.map((k) => k.id), now);
+  }
+  const view: View = { env: env.APP_ENV, viewer, access };
 
   if (method === "POST" && !isSameOrigin(request)) {
     return page(messagePage(view, "طلب مرفوض", "أُرسل هذا النموذج من خارج الموقع، فرُفض حمايةً لحسابك.", "error"), 403);

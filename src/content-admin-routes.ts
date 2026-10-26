@@ -198,7 +198,10 @@ async function editUnit(ctx: Ctx, program: Program, unit: Unit): Promise<Respons
 
 async function toggleUnit(ctx: Ctx, unit: Unit): Promise<Response> {
   const next = unit.status === "draft" ? "published" : "draft";
-  await ctx.env.DB.prepare("UPDATE units SET status = ?, updated_at = ? WHERE id = ?").bind(next, ctx.now, unit.id).run();
+  await ctx.env.DB
+    .prepare("UPDATE units SET status = ?, published_at = CASE WHEN ? = 'published' THEN COALESCE(published_at, ?) ELSE published_at END, updated_at = ? WHERE id = ?")
+    .bind(next, next, ctx.now, ctx.now, unit.id)
+    .run();
   await audit(ctx.env.DB, adminId(ctx), next === "published" ? "unit.published" : "unit.hidden", `unit:${unit.id}`, unit.title);
   return redirect(`/admin/units/${unit.id}?done=${next === "published" ? "unit-published" : "unit-hidden"}`);
 }
@@ -242,7 +245,10 @@ async function deleteUnit(ctx: Ctx, program: Program, unit: Unit): Promise<Respo
 }
 
 async function publishAll(ctx: Ctx, unit: Unit): Promise<Response> {
-  await ctx.env.DB.prepare("UPDATE lessons SET status = 'published', updated_at = ? WHERE unit_id = ? AND status = 'draft'").bind(ctx.now, unit.id).run();
+  await ctx.env.DB
+    .prepare("UPDATE lessons SET status = 'published', published_at = COALESCE(published_at, ?), updated_at = ? WHERE unit_id = ? AND status = 'draft'")
+    .bind(ctx.now, ctx.now, unit.id)
+    .run();
   await audit(ctx.env.DB, adminId(ctx), "lessons.published", `unit:${unit.id}`, unit.title);
   return redirect(`/admin/units/${unit.id}?done=all-published`);
 }
@@ -378,8 +384,11 @@ async function editLesson(ctx: Ctx, program: Program, unit: Unit, lesson: Lesson
     position = pos?.n ?? 1;
   }
   await db
-    .prepare("UPDATE lessons SET title = ?, description = ?, free = ?, status = ?, unit_id = ?, position = ?, file_mode = ?, updated_at = ? WHERE id = ?")
-    .bind(values.title, values.description || null, Number(values.free), values.status, target.id, position, lesson.kind === "pdf" ? values.file_mode : null, ctx.now, lesson.id)
+    .prepare(
+      `UPDATE lessons SET title = ?, description = ?, free = ?, status = ?, unit_id = ?, position = ?, file_mode = ?,
+         published_at = CASE WHEN ? = 'published' THEN COALESCE(published_at, ?) ELSE published_at END, updated_at = ? WHERE id = ?`,
+    )
+    .bind(values.title, values.description || null, Number(values.free), values.status, target.id, position, lesson.kind === "pdf" ? values.file_mode : null, values.status, ctx.now, ctx.now, lesson.id)
     .run();
   await audit(db, adminId(ctx), "lesson.updated", `lesson:${lesson.id}`, values.title);
   return redirect(`/admin/lessons/${lesson.id}?done=lesson-saved`);
@@ -390,7 +399,11 @@ async function toggleLesson(ctx: Ctx, lesson: Lesson, what: "free" | "status"): 
   if (what === "free") {
     await db.prepare("UPDATE lessons SET free = ?, updated_at = ? WHERE id = ?").bind(lesson.free ? 0 : 1, ctx.now, lesson.id).run();
   } else {
-    await db.prepare("UPDATE lessons SET status = ?, updated_at = ? WHERE id = ?").bind(lesson.status === "draft" ? "published" : "draft", ctx.now, lesson.id).run();
+    const next = lesson.status === "draft" ? "published" : "draft";
+    await db
+      .prepare("UPDATE lessons SET status = ?, published_at = CASE WHEN ? = 'published' THEN COALESCE(published_at, ?) ELSE published_at END, updated_at = ? WHERE id = ?")
+      .bind(next, next, ctx.now, ctx.now, lesson.id)
+      .run();
   }
   return redirect(`/admin/units/${lesson.unit_id}#lessons-title`);
 }

@@ -6,6 +6,8 @@ import { alertBox, input, layout, phoneExample, select, type View } from "./ui.t
 import { LEVELS, levelTitle } from "./content.ts";
 import { formatPhone, whatsappNumber } from "./phone.ts";
 import type { Account, Device, Student } from "./db.ts";
+import type { Program } from "./content.ts";
+import { KIND_TITLES, formatDate, statusLabel, subscriptionStatus, type SubKind, type SubStatus, type Subscription } from "./subscriptions.ts";
 
 export const LEVEL_OPTIONS = LEVELS.map((l) => ({ value: l.slug, label: l.title }));
 export const CHILD_SLOTS = 4;
@@ -75,12 +77,24 @@ export interface PendingDevice {
   phone: string;
 }
 
+export interface EndingSoon {
+  id: number;
+  kind: SubKind;
+  ends_at: number;
+  program_slug: string;
+  student: string;
+  account_id: number;
+  parent: string;
+  program: string;
+}
+
 export interface DashboardData {
   families: number;
   students: number;
   locked: number;
   pending: number;
   devices: PendingDevice[];
+  ending: EndingSoon[];
   recent: { at: number; action: string; detail: string | null; name: string | null }[];
 }
 
@@ -107,6 +121,9 @@ const ACTION_LABELS: Record<string, string> = {
   "pin.set": "وضع رمز ملف",
   "pin.cleared": "إزالة رمز ملف",
   "pin.locked": "قفل ملف بعد رموز خاطئة",
+  "subscription.activated": "تفعيل اشتراك",
+  "subscription.deleted": "حذف اشتراك",
+  "settings.updated": "تعديل الإعدادات",
   login: "تسجيل دخول",
   logout: "تسجيل خروج",
 };
@@ -137,6 +154,19 @@ export function dashboardPage(view: View, d: DashboardData): string {
   </div>
 </section>
 ${pendingDevicesSection(d.devices)}
+${
+  d.ending.length
+    ? html`<section class="section" aria-labelledby="ending-title">
+  <h2 id="ending-title">اشتراكات تنتهي خلال 7 أيام <span class="pill pill-warning">${d.ending.length}</span></h2>
+  <ul class="card device-list">${d.ending.map(
+    (e) => html`<li>
+    <span class="icon-box icon-box-sm icon-box-soft">${icon("card")}</span>
+    <span class="device-main"><strong><a href="/admin/families/${String(e.account_id)}#subs">${e.student}</a></strong><small>${e.program} · ${KIND_TITLES[e.kind]} · ينتهي ${formatDate(e.ends_at)} · الولي: ${e.parent}</small></span>
+  </li>`,
+  )}</ul>
+</section>`
+    : ""
+}
 <ul class="stats stats-4">
   <li class="card stat"><span class="icon-box">${icon("users")}</span><strong>${d.families}</strong><span class="muted">عائلة</span></li>
   <li class="card stat"><span class="icon-box icon-box-soft">${icon("user")}</span><strong>${d.students}</strong><span class="muted">تلميذ</span></li>
@@ -153,7 +183,7 @@ ${pendingDevicesSection(d.devices)}
       : html`<div class="card empty"><p>لا توجد عمليات بعد.</p></div>`
   }
 </section>
-<p class="muted small"><a href="/account/password">تغيير كلمة مرور الأستاذ</a></p>`,
+<p class="muted small"><a href="/admin/settings">الإعدادات: الفصول والأسعار والدفع وواتساب</a> · <a href="/account/password">تغيير كلمة مرور الأستاذ</a></p>`,
   );
 }
 
@@ -293,6 +323,61 @@ export function credentialsPage(
 
 // ---------- صفحة العائلة ----------
 
+function subPill(st: SubStatus): Raw {
+  const cls = st.state === "active" ? "pill-success" : st.state === "due" ? "pill-warning" : st.state === "expired" ? "pill-danger" : "pill-muted";
+  return html`<span class="pill ${cls}">${statusLabel(st)}</span>`;
+}
+
+function packageOptions(student: Student, programs: Program[]) {
+  const level = programs.find((p) => p.slug === student.level);
+  const out: { value: string; label: string }[] = [];
+  if (level) {
+    for (const k of ["term1", "term2", "term3", "year"] as const) out.push({ value: `${level.slug}:${k}`, label: `${level.short}: ${KIND_TITLES[k]}` });
+  }
+  for (const c of programs.filter((p) => p.kind === "course")) out.push({ value: `${c.slug}:course`, label: `${c.title}: سنة من اليوم` });
+  return out;
+}
+
+function subscriptionsSection(o: { students: Student[]; subs: Subscription[]; programs: Program[]; now: number; errors?: Record<string, string> }): Raw {
+  const e = o.errors ?? {};
+  const kids = o.students.filter((s) => s.status === "active");
+  const title = (slug: string) => o.programs.find((p) => p.slug === slug)?.title ?? slug;
+  return html`<section class="card form-card" aria-labelledby="subs-title" id="subs">
+    <h2 id="subs-title">الاشتراكات</h2>
+    ${kids.length ? "" : html`<p class="muted">لا يوجد ابن نشط.</p>`}
+    ${kids.map((s) => {
+      const mine = o.subs.filter((x) => x.student_id === s.id);
+      const programsHeld = [...new Set(mine.map((x) => x.program_slug))];
+      return html`<div class="sub-block">
+      <h3>${s.name}</h3>
+      <p class="sub-status">${subPill(subscriptionStatus(mine, s.level, o.now))}</p>
+      ${programsHeld.filter((p) => p !== s.level).map((p) => html`<p class="sub-status"><span class="muted">${title(p)}:</span> ${subPill(subscriptionStatus(mine, p, o.now))}</p>`)}
+      ${
+        mine.length
+          ? html`<ul class="sub-list">${mine.map(
+              (x) => html`<li>
+        <span><strong>${title(x.program_slug)}</strong> · ${KIND_TITLES[x.kind]}<small>${formatDate(x.starts_at)} ← ${formatDate(x.ends_at)}${x.note ? html` · ${x.note}` : ""}</small></span>
+        <details class="sub-del"><summary class="btn-link btn-danger-link" aria-label="حذف هذا الاشتراك">${icon("trash", "icon icon-sm")}</summary>
+          <form method="post" action="/admin/subscriptions/${String(x.id)}/delete" class="form">
+            <label class="check"><input type="checkbox" name="confirm" value="1" required> أؤكد حذف هذا الاشتراك (للأخطاء فقط)</label>
+            <button class="btn btn-danger btn-xs" type="submit">حذف</button>
+          </form>
+        </details>
+      </li>`,
+            )}</ul>`
+          : ""
+      }
+      ${alertBox(e[`sub_${s.id}`])}
+      <form method="post" action="/admin/students/${String(s.id)}/subscriptions" class="form sub-form" novalidate>
+        ${select({ name: "package", id: `f-package-${s.id}`, label: "تفعيل باقة بعد الدفع", options: packageOptions(s, o.programs), placeholder: "اختر الباقة" })}
+        ${input({ name: "note", id: `f-subnote-${s.id}`, label: "ملاحظة (اختياري)", maxlength: 200, hint: "مثل: دفع نقدًا يوم 10 جانفي" })}
+        <button class="btn btn-primary btn-sm" type="submit">${icon("check")}تفعيل</button>
+      </form>
+    </div>`;
+    })}
+  </section>`;
+}
+
 const DONE_MESSAGES: Record<string, string> = {
   edit: "حُفظت بيانات الولي.",
   child: "أُضيف الابن.",
@@ -304,6 +389,8 @@ const DONE_MESSAGES: Record<string, string> = {
   "device-removed": "أُزيل الجهاز وخرج من الحساب.",
   "devices-reset": "حُذفت كل الأجهزة. أول جهاز يدخل منه الولي سيُعتمد تلقائيًا.",
   "pins-cleared": "أُزيلت رموز كل الملفات.",
+  "sub-activated": "فُعّل الاشتراك. المحتوى مفتوح للابن الآن.",
+  "sub-deleted": "حُذف الاشتراك.",
 };
 
 export function familyPage(
@@ -312,6 +399,8 @@ export function familyPage(
     account: Account;
     students: Student[];
     devices: Device[];
+    subs: Subscription[];
+    programs: Program[];
     now: number;
     done?: string | null;
     errors?: Record<string, string>;
@@ -355,9 +444,9 @@ ${alertBox(Object.keys(e).length ? "راجع الخانات المشار إلي�
           <span class="kid-edit">${icon("pencil", "icon icon-sm")}تعديل</span>
         </summary>
         <form method="post" action="/admin/students/${String(s.id)}/edit" class="form" novalidate>
-          ${input({ name: "name", label: "الاسم الكامل", value: s.name, required: true, maxlength: 80 })}
-          ${select({ name: "level", label: "المستوى", options: LEVEL_OPTIONS, value: s.level })}
-          ${select({ name: "status", label: "الحالة", options: [{ value: "active", label: "نشط" }, { value: "disabled", label: "موقوف" }], value: s.status })}
+          ${input({ name: "name", id: `f-kidname-${s.id}`, label: "الاسم الكامل", value: s.name, required: true, maxlength: 80 })}
+          ${select({ name: "level", id: `f-kidlevel-${s.id}`, label: "المستوى", options: LEVEL_OPTIONS, value: s.level })}
+          ${select({ name: "status", id: `f-kidstatus-${s.id}`, label: "الحالة", options: [{ value: "active", label: "نشط" }, { value: "disabled", label: "موقوف" }], value: s.status })}
           <button class="btn btn-primary btn-sm" type="submit">حفظ</button>
         </form>
       </details>
@@ -384,6 +473,8 @@ ${alertBox(Object.keys(e).length ? "راجع الخانات المشار إلي�
       <button class="btn btn-primary btn-sm" type="submit">حفظ</button>
     </form>
   </section>
+
+  ${subscriptionsSection(o)}
 
   <section class="card form-card" aria-labelledby="devices">
     <h2 id="devices">الأجهزة</h2>

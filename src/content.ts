@@ -1,8 +1,7 @@
-// المحتوى: المستويات والدورات، والمقاطع، والدروس، وقاعدة من يحق له فتح الدرس.
+// المحتوى: المستويات والدورات، والمقاطع، والدروس. قاعدة من يحق له فتح الدرس في subscriptions.ts.
 // المستويات الخمسة ثابتة في الكود أيضًا لأن مستوى كل ابن يرتبط بها.
 
 import type { D1Database } from "./db.ts";
-import type { Viewer } from "./ui.ts";
 
 export const LEVELS = [
   { slug: "1am", title: "السنة الأولى متوسط", short: "1 متوسط" },
@@ -48,6 +47,7 @@ export interface Unit {
   status: Status;
   playlist_id: string | null;
   playlist_synced_at: number | null;
+  published_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -66,6 +66,7 @@ export interface Lesson {
   file_name: string | null;
   file_size: number | null;
   file_mode: FileMode | null;
+  published_at: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -149,13 +150,4 @@ export async function getLesson(db: D1Database, id: number): Promise<LessonConte
 /** الدرس ظاهر للعامة: منشور، في مقطع منشور. */
 export function isPublished(c: LessonContext): boolean {
   return c.lesson.status === "published" && c.unit.status === "published";
-}
-
-/**
- * من يحق له فتح الدرس (مشاهدة الفيديو أو فتح الملف).
- * المجاني للجميع. المدفوع للأستاذ فقط حاليًا؛ الاشتراكات تُضاف في المرحلة 5.
- */
-export function canOpen(viewer: Viewer | null, lesson: Pick<Lesson, "free">): boolean {
-  if (lesson.free) return true;
-  return viewer?.role === "admin";
 }

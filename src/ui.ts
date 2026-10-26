@@ -3,6 +3,7 @@
 
 import { html, type Raw } from "./html.ts";
 import { icon, type IconName } from "./icons.ts";
+import type { Access } from "./subscriptions.ts";
 
 export const SITE_NAME = "الأستاذ زين الدين للرياضيات";
 export const SLOGAN = "الرياضيات كما يجب أن تكون";
@@ -27,6 +28,8 @@ export function viewerHome(v: Viewer): string {
 export interface View {
   env: string;
   viewer: Viewer | null;
+  /** ما يحق لمن يتصفح فتحه من المحتوى المدفوع (اشتراكاته أو اشتراكات أبنائه). */
+  access?: Access;
 }
 
 export type NavKey =
@@ -41,6 +44,7 @@ export type NavKey =
   | "families"
   | "new-family"
   | "content"
+  | "settings"
   | null;
 
 function navItem(href: string, label: string, ic: IconName, key: NavKey, current: NavKey): Raw {
@@ -93,6 +97,7 @@ function drawerNav(area: "public" | "admin", view: View, current: NavKey): Raw {
       ${navItem("/admin/families", "العائلات", "users", "families", current)}
       ${navItem("/admin/families/new", "إضافة عائلة", "userPlus", "new-family", current)}
       ${navItem("/admin/content", "المحتوى", "book", "content", current)}
+      ${navItem("/admin/settings", "الإعدادات", "calendar", "settings", current)}
     </nav>
     <p class="drawer-label">الموقع</p>
     <nav class="drawer-nav" aria-label="الموقع">
@@ -178,7 +183,7 @@ ${opts.body}
 export interface InputOpts {
   name: string;
   label: string;
-  type?: "text" | "password" | "tel";
+  type?: "text" | "password" | "tel" | "date";
   value?: string;
   autocomplete?: string;
   inputmode?: "numeric" | "tel" | "text";
@@ -188,10 +193,12 @@ export interface InputOpts {
   hint?: string | Raw;
   maxlength?: number;
   autofocus?: boolean;
+  /** معرّف خاص عند تكرار نفس الحقل في الصفحة */
+  id?: string;
 }
 
 export function input(o: InputOpts): Raw {
-  const id = `f-${o.name}`;
+  const id = o.id ?? `f-${o.name}`;
   const describedBy = [o.hint ? `${id}-hint` : "", o.error ? `${id}-error` : ""].filter(Boolean).join(" ");
   return html`<div class="field${o.error ? " field-invalid" : ""}">
   <label for="${id}">${o.label}</label>
@@ -220,8 +227,9 @@ export function select(o: {
   error?: string;
   required?: boolean;
   placeholder?: string;
+  id?: string;
 }): Raw {
-  const id = `f-${o.name}`;
+  const id = o.id ?? `f-${o.name}`;
   return html`<div class="field${o.error ? " field-invalid" : ""}">
   <label for="${id}">${o.label}</label>
   <select id="${id}" class="input" name="${o.name}"${o.required ? html` required` : ""}${o.error ? html` aria-invalid="true" aria-describedby="${id}-error"` : ""}>

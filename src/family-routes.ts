@@ -10,6 +10,8 @@ import { audit, type Account, type Device, type Student } from "./db.ts";
 import { LOCK_MINUTES, MAX_FAILED_ATTEMPTS, passwordIterations, setProfile } from "./auth.ts";
 import { hashPassword, verifyPassword } from "./crypto.ts";
 import { field, page, readForm, redirect } from "./http.ts";
+import { listPrograms } from "./content.ts";
+import { getSettings, subscriptionStatus, type Subscription } from "./subscriptions.ts";
 import { parentPage, pinsPage, profilesPage, studentHomePage, unlockPage, type PinProfile } from "./family-pages.ts";
 import type { Ctx } from "./auth-routes.ts";
 
@@ -168,7 +170,8 @@ async function getStudentHome(ctx: Ctx): Promise<Response> {
     await setProfile(ctx.env.DB, session.id, null, null);
     return redirect("/profiles");
   }
-  return page(studentHomePage(ctx.view, target.student!));
+  const subs = await ctx.env.DB.prepare("SELECT * FROM subscriptions WHERE student_id = ?").bind(target.student!.id).all<Subscription>();
+  return page(studentHomePage(ctx.view, target.student!, subscriptionStatus(subs.results, target.student!.level, ctx.now)));
 }
 
 function requireParentProfile(ctx: Ctx): Response | null {
@@ -186,7 +189,22 @@ async function getParent(ctx: Ctx): Promise<Response> {
     .prepare("SELECT * FROM devices WHERE account_id = ? AND status != 'revoked' ORDER BY id")
     .bind(account.id)
     .all<Device>();
-  return page(parentPage(ctx.view, account, await activeStudents(ctx, account.id), devices.results));
+  const students = await activeStudents(ctx, account.id);
+  const subs = await ctx.env.DB
+    .prepare("SELECT s.* FROM subscriptions s JOIN students st ON st.id = s.student_id WHERE st.account_id = ? AND st.status = 'active'")
+    .bind(account.id)
+    .all<Subscription>();
+  // التوصيات: الدورات التي فيها دروس منشورة، ولا يشترك فيها أي ابن حاليًا
+  const held = (slug: string) =>
+    students.some((st) => {
+      const state = subscriptionStatus(subs.results.filter((x) => x.student_id === st.id), slug, ctx.now).state;
+      return state === "active" || state === "due";
+    });
+  const courses = (await listPrograms(ctx.env.DB)).filter((p) => p.kind === "course" && p.lessons > 0 && !held(p.slug));
+  const settings = await getSettings(ctx.env.DB);
+  return page(
+    parentPage(ctx.view, account, students, devices.results, { subs: subs.results, courses, whatsapp: settings.whatsapp, now: ctx.now }),
+  );
 }
 
 // ---------- رموز الملفات ----------

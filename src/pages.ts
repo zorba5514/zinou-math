@@ -6,10 +6,11 @@ import { html, type Raw } from "./html.ts";
 import { layout, ZIGZAG, SITE_NAME, SLOGAN, type View } from "./ui.ts";
 import { icon, type IconName } from "./icons.ts";
 import { describe, formula, intercept, linePath, toY, SIZE, UNIT } from "../public/graph.js";
+import { NO_ACCESS, canOpen, visibleSince, type Settings } from "./subscriptions.ts";
+import { whatsappNumber } from "./phone.ts";
 import {
   KIND_LABELS,
   formatSize,
-  canOpen,
   unitWord,
   type Lesson,
   type LessonContext,
@@ -145,15 +146,16 @@ ${programGrids(programs)}`,
   });
 }
 
-function lessonRow(view: View, lesson: Lesson): Raw {
+function lessonRow(view: View, unit: UnitWithLessons, lesson: Lesson): Raw {
   const kind = KIND_LABELS[lesson.kind];
   const draft = lesson.status === "draft" ? html` <span class="pill pill-warning">مسودة</span>` : "";
-  if (canOpen(view.viewer, lesson)) {
+  const open = canOpen(view.access ?? NO_ACCESS, { free: lesson.free, program_slug: unit.program_slug, visible_since: visibleSince(lesson, unit) });
+  if (open) {
     return html`<li>
   <a class="item" href="/lessons/${String(lesson.id)}">
     <span class="icon-box icon-box-sm">${icon(lesson.kind)}</span>
     <span class="item-body"><span class="item-title">${lesson.title}</span><span class="item-kind">${kind}</span></span>
-    ${lesson.free ? html`<span class="pill pill-success">مجاني</span>` : html`<span class="pill pill-muted">مدفوع</span>`}${draft}
+    ${lesson.free ? html`<span class="pill pill-success">مجاني</span>` : html`<span class="pill pill-muted">${icon("unlock", "icon icon-sm")}مفتوح لك</span>`}${draft}
   </a>
 </li>`;
   }
@@ -173,7 +175,7 @@ function unitBlock(view: View, unit: UnitWithLessons, index: number): Raw {
     <span class="unit-text"><span class="unit-title" id="unit-${String(unit.id)}">${unit.title}${unit.status === "draft" ? html` <span class="pill pill-warning">مسودة</span>` : ""}</span><span class="item-kind">${unit.lessons.length ? html`${unit.lessons.length} دروس${free ? html`، منها ${free} مجانًا` : ""}` : "الدروس قيد الإعداد"}</span></span>
     ${icon("chevron", "icon unit-chevron")}
   </summary>
-  ${unit.lessons.length ? html`<ul class="items">${unit.lessons.map((l) => lessonRow(view, l))}</ul>` : ""}`;
+  ${unit.lessons.length ? html`<ul class="items">${unit.lessons.map((l) => lessonRow(view, unit, l))}</ul>` : ""}`;
   return index === 0
     ? html`<details class="card unit" open>${summary}</details>`
     : html`<details class="card unit">${summary}</details>`;
@@ -246,7 +248,8 @@ ${lesson.description ? html`<p class="lesson-text">${lesson.description}</p>` : 
   });
 }
 
-export function subscribePage(view: View, locked?: { program: Program; lesson: Lesson }): string {
+export function subscribePage(view: View, settings: Settings, locked?: { program: Program; lesson: Lesson }): string {
+  const wa = settings.whatsapp ? `https://wa.me/${whatsappNumber(settings.whatsapp)}?text=${encodeURIComponent("السلام عليكم أستاذ، أريد الاشتراك في المنصة.")}` : null;
   return layout({
     title: "الاشتراك",
     view,
@@ -263,9 +266,9 @@ ${
 <section class="section" aria-labelledby="plans-title">
   <h2 id="plans-title">الباقات</h2>
   <ul class="card-grid">
-    <li class="card plan"><span class="icon-box icon-box-soft">${icon("book")}</span><strong>باقة الفصل</strong><span class="muted">كل دروس المستوى لفصل دراسي كامل.</span></li>
-    <li class="card plan plan-main"><span class="icon-box">${icon("level")}</span><strong>الباقة السنوية</strong><span class="muted">كل دروس المستوى للسنة الدراسية.</span></li>
-    <li class="card plan"><span class="icon-box icon-box-ink">${icon("trophy")}</span><strong>الدورات الخاصة</strong><span class="muted">كل دورة مفتوحة سنة كاملة من تاريخ التفعيل.</span></li>
+    <li class="card plan"><span class="icon-box icon-box-soft">${icon("book")}</span><strong>باقة الفصل</strong>${settings.price_term ? html`<span class="plan-price">${settings.price_term}</span>` : ""}<span class="muted">كل دروس المستوى حتى نهاية الفصل الدراسي.</span></li>
+    <li class="card plan plan-main"><span class="icon-box">${icon("level")}</span><strong>الباقة السنوية</strong>${settings.price_year ? html`<span class="plan-price">${settings.price_year}</span>` : ""}<span class="muted">كل دروس المستوى حتى نهاية السنة الدراسية.</span></li>
+    <li class="card plan"><span class="icon-box icon-box-ink">${icon("trophy")}</span><strong>الدورات الخاصة</strong>${settings.price_course ? html`<span class="plan-price">${settings.price_course}</span>` : ""}<span class="muted">كل دورة مفتوحة سنة كاملة من تاريخ التفعيل.</span></li>
   </ul>
 </section>
 <section class="section" aria-labelledby="steps-title">
@@ -276,7 +279,13 @@ ${
     ["استلم حسابك", "تدخل برقم هاتف الولي.", "user"],
   ])}
 </section>
-<div class="notice">الأسعار ومعلومات الدفع ورقم واتساب تُضاف من لوحة التحكم في المرحلة 5.</div>`,
+${
+  settings.payment_info
+    ? html`<section class="card form-card section" aria-labelledby="pay-title"><h2 id="pay-title">${icon("card")} طريقة الدفع</h2><p class="pay-info">${settings.payment_info}</p></section>`
+    : ""
+}
+${wa ? html`<div class="actions"><a class="btn btn-primary" href="${wa}" target="_blank" rel="noopener">${icon("chat")}تواصل مع الأستاذ عبر واتساب</a></div>` : ""}
+<p class="muted small">بعد انتهاء الاشتراك تبقى الدروس التي نُشرت أثناءه مفتوحة سنة كاملة، والدروس الجديدة تحتاج تجديد الاشتراك.</p>`,
   });
 }
 

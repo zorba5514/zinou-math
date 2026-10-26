@@ -6,6 +6,9 @@ import { alertBox, input, layout, logoutForm, type View } from "./ui.ts";
 import { LEVELS, levelTitle } from "./content.ts";
 import { formatPhone } from "./phone.ts";
 import type { Account, Device, Student } from "./db.ts";
+import type { ProgramSummary } from "./content.ts";
+import { statusLabel, subscriptionStatus, type SubStatus, type Subscription } from "./subscriptions.ts";
+import { whatsappNumber } from "./phone.ts";
 
 function initial(name: string): string {
   return name.trim().charAt(0) || "؟";
@@ -84,9 +87,21 @@ export function unlockPage(
   });
 }
 
+// ---------- الاشتراك ----------
+
+export function subPill(st: SubStatus): Raw {
+  const cls = st.state === "active" ? "pill-success" : st.state === "due" ? "pill-warning" : st.state === "expired" ? "pill-danger" : "pill-muted";
+  return html`<span class="pill pill-wrap ${cls}">${statusLabel(st)}</span>`;
+}
+
+/** رابط واتساب برسالة جاهزة إلى رقم الأستاذ، أو null إن لم يكتب رقمه في الإعدادات. */
+export function whatsappLink(phone: string | undefined, message: string): string | null {
+  return phone ? `https://wa.me/${whatsappNumber(phone)}?text=${encodeURIComponent(message)}` : null;
+}
+
 // ---------- صفحة الابن ----------
 
-export function studentHomePage(view: View, student: Student): string {
+export function studentHomePage(view: View, student: Student, status: SubStatus): string {
   const program = LEVELS.find((l) => l.slug === student.level);
   return layout({
     title: student.name,
@@ -96,6 +111,7 @@ export function studentHomePage(view: View, student: Student): string {
   <span class="badge-pill"><span class="dot"></span>مرحبًا بك</span>
   <h1>${student.name}</h1>
   <p class="muted hero-text">${levelTitle(student.level)}</p>
+  <p>${subPill(status)}</p>
   <div class="actions">
     ${program ? html`<a class="btn btn-primary" href="/levels/${program.slug}">دروس ${program.short} ${icon("arrowLeft")}</a>` : ""}
     <a class="btn btn-secondary" href="/profiles">${icon("users")}تبديل الملف</a>
@@ -112,7 +128,16 @@ function deviceStatusPill(d: Device): Raw {
     : html`<span class="pill pill-warning">بانتظار الأستاذ</span>`;
 }
 
-export function parentPage(view: View, account: Account, students: Student[], devices: Device[]): string {
+export interface ParentExtras {
+  subs: Subscription[];
+  /** الدورات المنشورة التي لا يشترك فيها أي ابن حاليًا */
+  courses: ProgramSummary[];
+  whatsapp?: string;
+  now: number;
+}
+
+export function parentPage(view: View, account: Account, students: Student[], devices: Device[], x: ParentExtras): string {
+  const statusOf = (s: Student) => subscriptionStatus(x.subs.filter((sub) => sub.student_id === s.id), s.level, x.now);
   return layout({
     title: "حساب العائلة",
     view,
@@ -135,12 +160,40 @@ export function parentPage(view: View, account: Account, students: Student[], de
       <span class="profile-avatar profile-avatar-sm">${initial(s.name)}</span>
       <span class="program-title">${s.name}</span>
       <span class="program-meta">${levelTitle(s.level)}</span>
+      ${subPill(statusOf(s))}
+      ${(() => {
+        const st = statusOf(s);
+        if (st.state === "active") return "";
+        const msg =
+          st.state === "due" || st.state === "expired"
+            ? `السلام عليكم أستاذ، أريد تجديد اشتراك ابني ${s.name} (${levelTitle(s.level)}).`
+            : `السلام عليكم أستاذ، أريد اشتراك ابني ${s.name} في ${levelTitle(s.level)}.`;
+        const link = whatsappLink(x.whatsapp, msg);
+        return link ? html`<a class="btn btn-secondary btn-sm btn-block" href="${link}" target="_blank" rel="noopener">${icon("chat")}${st.state === "none" ? "اشترك عبر واتساب" : "جدّد عبر واتساب"}</a>` : "";
+      })()}
       ${selectForm("student", s.id, html`فتح ملفه ${icon("arrowLeft")}`, "btn btn-secondary btn-sm btn-block")}
     </li>`,
         )}</ul>`
       : html`<div class="card empty"><p>لم يُضف أي ابن إلى هذا الحساب بعد. تواصل مع الأستاذ لإضافته.</p></div>`
   }
 </section>
+${
+  x.courses.length && students.length
+    ? html`<section class="section" aria-labelledby="rec-title">
+  <h2 id="rec-title">دورات ننصح بها</h2>
+  <ul class="card-grid">${x.courses.map((c) => {
+    const link = whatsappLink(x.whatsapp, `السلام عليكم أستاذ، أريد الاشتراك في دورة «${c.title}».`);
+    return html`<li class="card program-card">
+      <span class="icon-box icon-box-ink">${icon(c.icon)}</span>
+      <span class="program-title">${c.title}</span>
+      <span class="program-meta">${c.lessons} درسًا · سنة كاملة من التفعيل</span>
+      <a class="btn btn-secondary btn-sm btn-block" href="/levels/${c.slug}">تفاصيل الدورة</a>
+      ${link ? html`<a class="btn btn-primary btn-sm btn-block" href="${link}" target="_blank" rel="noopener">${icon("chat")}اشترك عبر واتساب</a>` : ""}
+    </li>`;
+  })}</ul>
+</section>`
+    : ""
+}
 <section class="section" aria-labelledby="devices-title">
   <h2 id="devices-title">الأجهزة</h2>
   <ul class="card device-list">${devices.map(
