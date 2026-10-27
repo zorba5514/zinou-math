@@ -1,7 +1,8 @@
 // مسارات لوحة تحكم الأستاذ.
 
 import { audit, type Account, type Device, type Student } from "./db.ts";
-import { getSettings, computeEnd, ENDING_SOON_DAYS, type SubKind, type Subscription } from "./subscriptions.ts";
+import { getSettings, ENDING_SOON_DAYS, type SubKind, type Subscription } from "./subscriptions.ts";
+import { activate, parseAmount, prepareItems, recordPayment, unpaidSubscriptions, type PackageItem, type Payment } from "./payments.ts";
 import type { Program } from "./content.ts";
 import { endOtherSessions, passwordIterations } from "./auth.ts";
 import { hashPassword, temporaryPassword } from "./crypto.ts";
@@ -46,7 +47,9 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
 
   if (path === "/admin" && method === "GET") return dashboard(ctx);
   if (path === "/admin/families" && method === "GET") return familiesList(ctx);
-  if (path === "/admin/families/new") return method === "POST" ? createFamily(ctx) : page(newFamilyPage(ctx.view, emptyFamily()));
+  if (path === "/admin/families/new") {
+    return method === "POST" ? createFamily(ctx) : page(newFamilyPage(ctx.view, emptyFamily(), { settings: await getSettings(ctx.env.DB), now: ctx.now }));
+  }
 
   const fam = /^\/admin\/families\/(\d+)(?:\/([a-z-]+))?$/.exec(path);
   if (fam) {
@@ -62,6 +65,8 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
       if (action === "status") return setStatus(ctx, account);
       if (action === "reset-devices") return resetDevices(ctx, account);
       if (action === "clear-pins") return clearPins(ctx, account);
+      if (action === "activate") return activateFamily(ctx, account);
+      if (action === "payments") return payFamily(ctx, account);
     }
   }
 
@@ -71,8 +76,6 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
   const kid = /^\/admin\/students\/(\d+)\/edit$/.exec(path);
   if (kid && method === "POST") return editStudent(ctx, Number(kid[1]));
 
-  const activate = /^\/admin\/students\/(\d+)\/subscriptions$/.exec(path);
-  if (activate && method === "POST") return activateSubscription(ctx, Number(activate[1]));
   const removeSub = /^\/admin\/subscriptions\/(\d+)\/delete$/.exec(path);
   if (removeSub && method === "POST") return deleteSubscription(ctx, Number(removeSub[1]));
 
@@ -124,6 +127,7 @@ async function dashboard(ctx: Ctx): Promise<Response> {
       ).results,
       ending: await endingSoon(ctx),
       grading: await pendingGrading(ctx),
+      unpaid: await unpaidSubscriptions(ctx.env.DB, ctx.now),
       recent: recent.results,
     }),
   );
@@ -171,11 +175,15 @@ async function familiesList(ctx: Ctx): Promise<Response> {
 // ---------- إنشاء عائلة ----------
 
 function emptyFamily(): NewFamilyValues {
-  return { name: "", phone: "", note: "", children: [] };
+  return { name: "", phone: "", note: "", children: [], amount: "", receipt: "" };
 }
+
+const LEVEL_KINDS = ["term1", "term2", "term3", "year"];
 
 async function createFamily(ctx: Ctx): Promise<Response> {
   const form = await readForm(ctx.request);
+  const db = ctx.env.DB;
+  const settings = await getSettings(db);
   const v: NewFamilyValues = {
     name: field(form, "name"),
     phone: field(form, "phone"),
@@ -183,26 +191,40 @@ async function createFamily(ctx: Ctx): Promise<Response> {
     children: Array.from({ length: CHILD_SLOTS }, (_, i) => ({
       name: field(form, `child_name_${i + 1}`),
       level: field(form, `child_level_${i + 1}`),
+      package: field(form, `child_package_${i + 1}`) || "none",
     })),
+    amount: field(form, "amount"),
+    receipt: field(form, "receipt").slice(0, 60),
   };
   const errors: Record<string, string> = {};
   if (!validName(v.name)) errors.name = "اكتب اسم الولي (حرفان على الأقل).";
   const phone = normalizePhone(v.phone);
   if (!phone) errors.phone = "رقم الهاتف غير صحيح. يجب أن يتكون من 10 أرقام ويبدأ بـ 05 أو 06 أو 07.";
-  else if (await ctx.env.DB.prepare("SELECT id FROM accounts WHERE phone = ?").bind(phone).first()) {
+  else if (await db.prepare("SELECT id FROM accounts WHERE phone = ?").bind(phone).first()) {
     errors.phone = "هذا الرقم مسجل لعائلة أخرى. ابحث عنه في قائمة العائلات.";
   }
-  const kids = v.children.filter((c) => c.name || c.level);
-  v.children.forEach((c, i) => {
-    if (!c.name && !c.level) return;
-    if (!validName(c.name)) errors[`child_${i + 1}`] = "اكتب اسم الابن.";
-    else if (!validLevel(c.level)) errors[`child_${i + 1}`] = "اختر مستوى الابن.";
-  });
+  const kids = v.children.map((c, i) => ({ ...c, slot: i + 1 })).filter((c) => c.name || c.level);
+  for (const c of kids) {
+    if (!validName(c.name)) errors[`child_${c.slot}`] = "اكتب اسم الابن.";
+    else if (!validLevel(c.level)) errors[`child_${c.slot}`] = "اختر مستوى الابن.";
+    else if (c.package !== "none" && !LEVEL_KINDS.includes(c.package)) errors[`package_${c.slot}`] = "اختر الاشتراك.";
+  }
   if (!kids.length) errors.children = "أضف ابنًا واحدًا على الأقل.";
-  if (Object.keys(errors).length || !phone) return page(newFamilyPage(ctx.view, v, errors), 400);
+  const amount = parseAmount(v.amount);
+  if (Number.isNaN(amount)) errors.amount = "اكتب المبلغ بالأرقام فقط، مثل 4000.";
+  const toActivate = kids.filter((c) => c.package !== "none");
+  if (amount && !toActivate.length) errors.amount = "لا يوجد اشتراك ليُسجَّل له المبلغ. اختر اشتراكًا لابن واحد على الأقل.";
+  // تواريخ الباقات تُتحقق قبل إنشاء أي شيء
+  const prepared = prepareItems(
+    toActivate.map((c) => ({ studentId: c.slot, studentName: c.name, programSlug: c.level, kind: c.package as SubKind })),
+    settings,
+    ctx.now,
+  );
+  if (!prepared.ok) errors[`package_${prepared.studentId}`] = prepared.error;
+  const terms = { settings, now: ctx.now };
+  if (Object.keys(errors).length || !phone || !prepared.ok) return page(newFamilyPage(ctx.view, v, terms, errors), 400);
 
   const password = temporaryPassword();
-  const db = ctx.env.DB;
   const created = await db
     .prepare(
       "INSERT INTO accounts (role, phone, name, password_hash, must_change_password, note, created_at, updated_at) VALUES ('parent', ?, ?, ?, 1, ?, ?, ?)",
@@ -210,12 +232,23 @@ async function createFamily(ctx: Ctx): Promise<Response> {
     .bind(phone, v.name, await hashPassword(password, passwordIterations(ctx.env)), v.note || null, ctx.now, ctx.now)
     .run();
   const id = Number(created.meta.last_row_id);
-  await db.batch(
-    kids.map((c) =>
-      db.prepare("INSERT INTO students (account_id, name, level, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").bind(id, c.name, c.level, ctx.now, ctx.now),
-    ),
-  );
+  const studentIds: Record<number, number> = {};
+  for (const c of kids) {
+    const r = await db
+      .prepare("INSERT INTO students (account_id, name, level, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(id, c.name, c.level, ctx.now, ctx.now)
+      .run();
+    studentIds[c.slot] = Number(r.meta.last_row_id);
+  }
   await audit(db, adminId(ctx), "family.created", `account:${id}`, `${kids.length} ${kids.length === 1 ? "ابن" : "أبناء"}`);
+  await activate(db, {
+    accountId: id,
+    rows: prepared.rows.map((r) => ({ ...r, studentId: studentIds[r.studentId]! })),
+    amount: amount || null,
+    receipt: v.receipt || null,
+    now: ctx.now,
+    adminId: adminId(ctx),
+  });
   const account = await loadFamily(ctx, id);
   if (!account) return page(notFoundPage(ctx.view), 500);
   return page(credentialsPage(ctx.view, { account, password, loginUrl: `${ctx.url.origin}/login`, created: true }));
@@ -225,6 +258,7 @@ async function createFamily(ctx: Ctx): Promise<Response> {
 
 const DONE_KEYS = new Set([
   "sub-activated",
+  "paid",
   "sub-deleted",
   "edit",
   "child",
@@ -245,11 +279,14 @@ async function familyData(ctx: Ctx, accountId: number) {
     .bind(accountId)
     .all<Subscription>();
   const programs = await db.prepare("SELECT * FROM programs ORDER BY position, slug").all<Program>();
+  const payments = await db.prepare("SELECT * FROM payments WHERE account_id = ? ORDER BY paid_at DESC, id DESC").bind(accountId).all<Payment>();
   return {
     students: await loadStudents(ctx, accountId),
     devices: await loadDevices(ctx, accountId),
     subs: subs.results,
     programs: programs.results,
+    payments: payments.results,
+    settings: await getSettings(db),
   };
 }
 
@@ -295,19 +332,46 @@ async function editFamily(ctx: Ctx, account: Account): Promise<Response> {
 }
 
 async function addChild(ctx: Ctx, account: Account): Promise<Response> {
+  const db = ctx.env.DB;
   const form = await readForm(ctx.request);
-  const values = { child_name: field(form, "child_name"), child_level: field(form, "child_level") };
+  const values = {
+    child_name: field(form, "child_name"),
+    child_level: field(form, "child_level"),
+    child_package: field(form, "child_package") || "none",
+    child_amount: field(form, "amount"),
+    child_receipt: field(form, "receipt").slice(0, 60),
+  };
   const errors: Record<string, string> = {};
   if (!validName(values.child_name)) errors.child_name = "اكتب اسم الابن.";
   if (!validLevel(values.child_level)) errors.child_level = "اختر المستوى.";
-  if (Object.keys(errors).length) {
+  if (values.child_package !== "none" && !LEVEL_KINDS.includes(values.child_package)) errors.child_package = "اختر الاشتراك.";
+  const amount = parseAmount(values.child_amount);
+  if (Number.isNaN(amount)) errors.child_amount = "اكتب المبلغ بالأرقام فقط، مثل 4000.";
+  if (amount && values.child_package === "none") errors.child_amount = "اختر اشتراكًا ليُسجَّل له المبلغ.";
+  const settings = await getSettings(db);
+  const prepared = prepareItems(
+    values.child_package === "none" ? [] : [{ studentId: 0, studentName: values.child_name, programSlug: values.child_level, kind: values.child_package as SubKind }],
+    settings,
+    ctx.now,
+  );
+  if (!prepared.ok) errors.child_package = prepared.error;
+  if (Object.keys(errors).length || !prepared.ok) {
     return page(familyPage(ctx.view, { account, ...(await familyData(ctx, account.id)), now: ctx.now, errors, values }), 400);
   }
-  await ctx.env.DB
+  const r = await db
     .prepare("INSERT INTO students (account_id, name, level, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
     .bind(account.id, values.child_name, values.child_level, ctx.now, ctx.now)
     .run();
-  await audit(ctx.env.DB, adminId(ctx), "student.added", `account:${account.id}`, values.child_name);
+  const studentId = Number(r.meta.last_row_id);
+  await audit(db, adminId(ctx), "student.added", `account:${account.id}`, values.child_name);
+  await activate(db, {
+    accountId: account.id,
+    rows: prepared.rows.map((row) => ({ ...row, studentId })),
+    amount: amount || null,
+    receipt: values.child_receipt || null,
+    now: ctx.now,
+    adminId: adminId(ctx),
+  });
   return redirect(`/admin/families/${account.id}?done=child`);
 }
 
@@ -407,33 +471,56 @@ async function clearPins(ctx: Ctx, account: Account): Promise<Response> {
 
 // ---------- الاشتراكات ----------
 
-async function activateSubscription(ctx: Ctx, studentId: number): Promise<Response> {
+/** تفعيل أو تجديد لعدة أبناء دفعة واحدة، بمبلغ واحد يُقسَّم عليهم. */
+async function activateFamily(ctx: Ctx, account: Account): Promise<Response> {
   const db = ctx.env.DB;
-  const student = await db
-    .prepare("SELECT s.* FROM students s JOIN accounts a ON a.id = s.account_id WHERE s.id = ? AND a.role = 'parent'")
-    .bind(studentId)
-    .first<Student>();
-  if (!student) return page(notFoundPage(ctx.view), 404);
-  const account = await loadFamily(ctx, student.account_id);
-  if (!account) return page(notFoundPage(ctx.view), 404);
   const form = await readForm(ctx.request);
-  // الباقة بصيغة «المستوى:النوع»، مثل 2am:term1 أو olympiad:course
-  const [slug = "", kindText = ""] = field(form, "package").split(":");
-  const note = field(form, "note").slice(0, 200);
-  const program = await db.prepare("SELECT * FROM programs WHERE slug = ?").bind(slug).first<Program>();
-  const validKind = program?.kind === "course" ? kindText === "course" : ["term1", "term2", "term3", "year"].includes(kindText);
-  const fail = async (message: string) =>
-    page(familyPage(ctx.view, { account, ...(await familyData(ctx, account.id)), now: ctx.now, errors: { [`sub_${studentId}`]: message } }), 400);
-  if (!program || !validKind) return fail("اختر الباقة.");
-  const kind = kindText as SubKind;
-  const end = computeEnd(kind, await getSettings(db), ctx.now);
-  if (!end.ok) return fail(end.error);
-  await db
-    .prepare("INSERT INTO subscriptions (student_id, program_slug, kind, starts_at, ends_at, note, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(studentId, program.slug, kind, ctx.now, end.endsAt, note || null, adminId(ctx), ctx.now)
-    .run();
-  await audit(db, adminId(ctx), "subscription.activated", `account:${account.id}`, `${student.name} · ${program.title}`);
+  const students = (await loadStudents(ctx, account.id)).filter((s) => s.status === "active");
+  const programs = (await db.prepare("SELECT * FROM programs").all<Program>()).results;
+  const values: Record<string, string> = { act_amount: field(form, "amount"), act_receipt: field(form, "receipt").slice(0, 60) };
+  const errors: Record<string, string> = {};
+  const items: PackageItem[] = [];
+  for (const s of students) {
+    const value = field(form, `package_${s.id}`);
+    values[`package_${s.id}`] = value;
+    if (!value) continue;
+    // الباقة بصيغة «المستوى:النوع»، مثل 2am:term1 أو olympiad:course
+    const [slug = "", kindText = ""] = value.split(":");
+    const program = programs.find((p) => p.slug === slug);
+    const ok = program?.kind === "course" ? kindText === "course" : program?.slug === s.level && LEVEL_KINDS.includes(kindText);
+    if (!program || !ok) errors[`package_${s.id}`] = "اختر الباقة.";
+    else items.push({ studentId: s.id, studentName: s.name, programSlug: slug, kind: kindText as SubKind });
+  }
+  const amount = parseAmount(values.act_amount!);
+  if (Number.isNaN(amount)) errors.act_amount = "اكتب المبلغ بالأرقام فقط، مثل 4000.";
+  if (!items.length && !Object.keys(errors).length) errors.activate = "اختر باقة لابن واحد على الأقل.";
+  const prepared = prepareItems(items, await getSettings(db), ctx.now);
+  if (!prepared.ok) errors[`package_${prepared.studentId}`] = prepared.error;
+  if (Object.keys(errors).length || !prepared.ok) {
+    return page(familyPage(ctx.view, { account, ...(await familyData(ctx, account.id)), now: ctx.now, errors, values }), 400);
+  }
+  await activate(db, { accountId: account.id, rows: prepared.rows, amount: amount || null, receipt: values.act_receipt || null, now: ctx.now, adminId: adminId(ctx) });
   return redirect(`/admin/families/${account.id}?done=sub-activated#subs`);
+}
+
+/** دفعة لاحقة لاشتراكات غير مدفوعة. */
+async function payFamily(ctx: Ctx, account: Account): Promise<Response> {
+  const db = ctx.env.DB;
+  const form = await readForm(ctx.request);
+  const data = await familyData(ctx, account.id);
+  const unpaid = data.subs.filter((x) => x.payment_id === null && x.pay_due_at !== null);
+  const chosen = unpaid.filter((x) => form.get(`sub_${x.id}`) === "1");
+  const values: Record<string, string> = { pay_amount: field(form, "amount"), pay_receipt: field(form, "receipt").slice(0, 60) };
+  for (const x of unpaid) values[`sub_${x.id}`] = form.get(`sub_${x.id}`) === "1" ? "1" : "0";
+  const errors: Record<string, string> = {};
+  const amount = parseAmount(values.pay_amount!);
+  if (!amount) errors.pay_amount = "اكتب المبلغ المدفوع بالأرقام، مثل 4000.";
+  if (!chosen.length) errors.pay_form = "حدّد الاشتراكات التي تغطيها هذه الدفعة.";
+  if (Object.keys(errors).length || !amount) {
+    return page(familyPage(ctx.view, { account, ...data, now: ctx.now, errors, values }), 400);
+  }
+  await recordPayment(db, { accountId: account.id, subs: chosen, amount, receipt: values.pay_receipt || null, now: ctx.now, adminId: adminId(ctx) });
+  return redirect(`/admin/families/${account.id}?done=paid#subs`);
 }
 
 async function deleteSubscription(ctx: Ctx, id: number): Promise<Response> {

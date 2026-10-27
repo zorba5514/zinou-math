@@ -8,6 +8,11 @@ import { mathText } from "../src/math.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
 
+/** رقم حساب العائلة التجريبية. */
+function famOf(env: TestEnv): number {
+  return Number(env.DB.raw.prepare("SELECT id FROM accounts WHERE phone = '0661223344'").get()?.id);
+}
+
 // ---------- العبارات الرياضية ----------
 
 test("قراءة العبارات: كسور وجذور وأسس وضرب ضمني، ورسائل واضحة للأخطاء", () => {
@@ -340,7 +345,7 @@ test("الصلاحيات: الولي لا يجتاز ويرى نتائج ابن�
   assert.equal((await s.parent.post(`/quizzes/${s.quizId}/start`, {})).headers.get("Location"), `/subscribe?lesson=${s.lessonId}`);
   // نفعّل اشتراكًا
   await s.admin.post("/admin/settings", { term1_end: new Date(Date.now() + 60 * DAY).toISOString().slice(0, 10) });
-  await s.admin.post(`/admin/students/${s.yacine}/subscriptions`, { package: "2am:term1" });
+  await s.admin.post(`/admin/families/${famOf(s.env)}/activate`, { [`package_${s.yacine}`]: "2am:term1", amount: "3000", receipt: "وصل 12" });
   const id = await start(s);
   await s.parent.post(`/attempts/${id}/submit`, { [`q_${s.questionIds[0]}`]: "true" });
 

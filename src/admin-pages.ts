@@ -7,7 +7,8 @@ import { LEVELS, levelTitle } from "./content.ts";
 import { formatPhone, whatsappNumber } from "./phone.ts";
 import type { Account, Device, Student } from "./db.ts";
 import type { Program } from "./content.ts";
-import { KIND_TITLES, formatDate, statusLabel, subscriptionStatus, type SubKind, type SubStatus, type Subscription } from "./subscriptions.ts";
+import { KIND_TITLES, computeEnd, counts, formatDate, statusClass, statusLabel, subscriptionStatus, type Settings, type SubKind, type SubStatus, type Subscription } from "./subscriptions.ts";
+import { PAY_GRACE_DAYS, currentTerm, formatAmount, type Payment, type UnpaidRow } from "./payments.ts";
 
 export const LEVEL_OPTIONS = LEVELS.map((l) => ({ value: l.slug, label: l.title }));
 export const CHILD_SLOTS = 4;
@@ -66,6 +67,33 @@ function pendingDevicesSection(devices: PendingDevice[]): Raw {
 </section>`;
 }
 
+// ---------- الدفع المنتظر ----------
+
+function unpaidSection(rows: UnpaidRow[]): Raw {
+  if (!rows.length) return html``;
+  const now = Date.now();
+  // عائلة واحدة في سطر واحد، بأقرب أجل
+  const families = new Map<number, { parent: string; items: UnpaidRow[] }>();
+  for (const r of rows) {
+    const f = families.get(r.account_id) ?? { parent: r.parent, items: [] };
+    f.items.push(r);
+    families.set(r.account_id, f);
+  }
+  const overdue = rows.filter((r) => r.pay_due_at < now).length;
+  return html`<section class="section" aria-labelledby="unpaid-title">
+  <h2 id="unpaid-title">بانتظار الدفع <span class="pill ${overdue ? "pill-danger" : "pill-warning"}">${families.size}</span></h2>
+  <ul class="card device-list">${[...families].map(([accountId, f]) => {
+    const first = Math.min(...f.items.map((i) => i.pay_due_at));
+    const late = first < now;
+    return html`<li>
+    <span class="icon-box icon-box-sm ${late ? "icon-box-danger" : "icon-box-soft"}">${icon("card")}</span>
+    <span class="device-main"><strong><a href="/admin/families/${String(accountId)}#subs">${f.parent}</a></strong><small>${f.items.map((i, k) => html`${k ? "، " : ""}${i.student} (${i.program})`)}</small></span>
+    <span class="pill ${late ? "pill-danger" : "pill-warning"}">${late ? "انتهت المهلة: الاشتراك متوقف" : `حتى ${formatDate(first)}`}</span>
+  </li>`;
+  })}</ul>
+</section>`;
+}
+
 // ---------- لوحة التحكم ----------
 
 export interface PendingDevice {
@@ -96,6 +124,7 @@ export interface DashboardData {
   devices: PendingDevice[];
   ending: EndingSoon[];
   grading: { id: number; submitted_at: number; student: string; quiz: string }[];
+  unpaid: UnpaidRow[];
   recent: { at: number; action: string; detail: string | null; name: string | null }[];
 }
 
@@ -125,6 +154,7 @@ const ACTION_LABELS: Record<string, string> = {
   "subscription.activated": "تفعيل اشتراك",
   "subscription.deleted": "حذف اشتراك",
   "settings.updated": "تعديل الإعدادات",
+  "payment.recorded": "تسجيل دفعة",
   "quiz.added": "إنشاء اختبار",
   "course.added": "إضافة دورة",
   "course.updated": "تعديل اسم دورة",
@@ -173,6 +203,7 @@ export function dashboardPage(view: View, d: DashboardData): string {
   </div>
 </section>
 ${pendingDevicesSection(d.devices)}
+${unpaidSection(d.unpaid)}
 ${
   d.grading.length
     ? html`<section class="section" aria-labelledby="grading-title">
@@ -267,11 +298,42 @@ export interface NewFamilyValues {
   name: string;
   phone: string;
   note: string;
-  children: { name: string; level: string }[];
+  children: { name: string; level: string; package: string }[];
+  amount: string;
+  receipt: string;
 }
 
-export function newFamilyPage(view: View, v: NewFamilyValues, errors: Record<string, string> = {}): string {
-  const slots = Array.from({ length: CHILD_SLOTS }, (_, i) => v.children[i] ?? { name: "", level: "" });
+export interface TermInfo {
+  settings: Settings;
+  now: number;
+}
+
+/** خيارات باقة المستوى عند الإنشاء: الفصول بتواريخ نهايتها، والسنة، أو بدون اشتراك. */
+export function levelPackageOptions(t: TermInfo): { value: string; label: string }[] {
+  const label = (k: SubKind) => {
+    const end = computeEnd(k, t.settings, t.now);
+    return end.ok ? `${KIND_TITLES[k]} (حتى ${formatDate(end.endsAt)})` : `${KIND_TITLES[k]} (انتهى أو تاريخه غير مكتوب)`;
+  };
+  return [
+    ...(["term1", "term2", "term3", "year"] as const).map((k) => ({ value: k, label: label(k) })),
+    { value: "none", label: "بدون اشتراك الآن" },
+  ];
+}
+
+export function defaultPackage(t: TermInfo): string {
+  return currentTerm(t.settings, t.now) ?? "none";
+}
+
+/** خانتا المبلغ ورقم الوصل، مع شرح المهلة. */
+function paymentFields(v: { amount?: string; receipt?: string }, e: Record<string, string>, idPrefix = "f"): Raw {
+  return html`<div class="pay-fields">
+    ${input({ name: "amount", id: `${idPrefix}-amount`, label: "المبلغ المدفوع (دج)", value: v.amount, inputmode: "numeric", dir: "ltr", error: e.amount, hint: `اكتب المبلغ المكتوب في الوصل. يُقسَّم بالتساوي على الأبناء. إن تركته فارغًا يبقى الاشتراك مفعّلًا ${PAY_GRACE_DAYS} يومًا في انتظار الدفع.` })}
+    ${input({ name: "receipt", id: `${idPrefix}-receipt`, label: "رقم الوصل (اختياري)", value: v.receipt, maxlength: 60 })}
+  </div>`;
+}
+
+export function newFamilyPage(view: View, v: NewFamilyValues, terms: TermInfo, errors: Record<string, string> = {}): string {
+  const slots = Array.from({ length: CHILD_SLOTS }, (_, i) => v.children[i] ?? { name: "", level: "", package: "" });
   return adminLayout(
     view,
     "إضافة عائلة",
@@ -298,9 +360,14 @@ ${alertBox(Object.keys(errors).length ? "راجع الخانات المشار إ
       <legend>الابن ${String(i + 1)}</legend>
       ${input({ name: `child_name_${i + 1}`, label: "الاسم الكامل", value: c.name, error: errors[`child_${i + 1}`], maxlength: 80 })}
       ${select({ name: `child_level_${i + 1}`, label: "المستوى", options: LEVEL_OPTIONS, value: c.level, placeholder: "اختر المستوى" })}
+      ${select({ name: `child_package_${i + 1}`, label: "الاشتراك (يُفعَّل فورًا)", options: levelPackageOptions(terms), value: c.package || defaultPackage(terms), error: errors[`package_${i + 1}`] })}
     </fieldset>`,
     )}
     </div>
+  </section>
+  <section class="card form-card">
+    <h2>الدفع</h2>
+    ${paymentFields({ amount: v.amount, receipt: v.receipt }, errors)}
   </section>
   <div class="form-actions">
     <button class="btn btn-primary" type="submit">${icon("userPlus")}إنشاء الحساب</button>
@@ -356,26 +423,46 @@ export function credentialsPage(
 // ---------- صفحة العائلة ----------
 
 function subPill(st: SubStatus): Raw {
-  const cls = st.state === "active" ? "pill-success" : st.state === "due" ? "pill-warning" : st.state === "expired" ? "pill-danger" : "pill-muted";
-  return html`<span class="pill ${cls}">${statusLabel(st)}</span>`;
+  const cls = statusClass(st);
+  return html`<span class="pill pill-wrap ${cls}">${statusLabel(st)}</span>`;
 }
 
-function packageOptions(student: Student, programs: Program[]) {
+function packageOptions(student: Student, programs: Program[], t: TermInfo) {
   const level = programs.find((p) => p.slug === student.level);
-  const out: { value: string; label: string }[] = [];
+  const out: { value: string; label: string }[] = [{ value: "", label: "—" }];
   if (level) {
-    for (const k of ["term1", "term2", "term3", "year"] as const) out.push({ value: `${level.slug}:${k}`, label: `${level.short}: ${KIND_TITLES[k]}` });
+    for (const opt of levelPackageOptions(t).filter((x) => x.value !== "none")) out.push({ value: `${level.slug}:${opt.value}`, label: `${level.short}: ${opt.label}` });
   }
   for (const c of programs.filter((p) => p.kind === "course")) out.push({ value: `${c.slug}:course`, label: `${c.title}: سنة من اليوم` });
   return out;
 }
 
-function subscriptionsSection(o: { students: Student[]; subs: Subscription[]; programs: Program[]; now: number; errors?: Record<string, string> }): Raw {
+function payState(x: Subscription, now: number): Raw {
+  if (x.payment_id !== null) return html`<span class="pill pill-success">مدفوع${x.amount ? html` · ${formatAmount(x.amount)}` : ""}</span>`;
+  if (x.pay_due_at === null) return html``;
+  return counts(x, now)
+    ? html`<span class="pill pill-warning">بانتظار الدفع حتى ${formatDate(x.pay_due_at)}</span>`
+    : html`<span class="pill pill-danger">متوقف: انتهت مهلة الدفع</span>`;
+}
+
+function subscriptionsSection(o: {
+  students: Student[];
+  subs: Subscription[];
+  programs: Program[];
+  payments: Payment[];
+  settings: Settings;
+  now: number;
+  errors?: Record<string, string>;
+  values?: Record<string, string>;
+}): Raw {
   const e = o.errors ?? {};
+  const v = o.values ?? {};
   const kids = o.students.filter((s) => s.status === "active");
   const title = (slug: string) => o.programs.find((p) => p.slug === slug)?.title ?? slug;
+  const name = (id: number) => o.students.find((s) => s.id === id)?.name ?? "";
+  const unpaid = o.subs.filter((x) => x.payment_id === null && x.pay_due_at !== null && x.ends_at >= o.now);
   return html`<section class="card form-card" aria-labelledby="subs-title" id="subs">
-    <h2 id="subs-title">الاشتراكات</h2>
+    <h2 id="subs-title">الاشتراكات والدفع</h2>
     ${kids.length ? "" : html`<p class="muted">لا يوجد ابن نشط.</p>`}
     ${kids.map((s) => {
       const mine = o.subs.filter((x) => x.student_id === s.id);
@@ -388,7 +475,7 @@ function subscriptionsSection(o: { students: Student[]; subs: Subscription[]; pr
         mine.length
           ? html`<ul class="sub-list">${mine.map(
               (x) => html`<li>
-        <span><strong>${title(x.program_slug)}</strong> · ${KIND_TITLES[x.kind]}<small>${formatDate(x.starts_at)} ← ${formatDate(x.ends_at)}${x.note ? html` · ${x.note}` : ""}</small></span>
+        <span><strong>${title(x.program_slug)}</strong> · ${KIND_TITLES[x.kind]}<small>${formatDate(x.starts_at)} ← ${formatDate(x.ends_at)}</small>${payState(x, o.now)}</span>
         <details class="sub-del"><summary class="btn-link btn-danger-link" aria-label="حذف هذا الاشتراك">${icon("trash", "icon icon-sm")}</summary>
           <form method="post" action="/admin/subscriptions/${String(x.id)}/delete" class="form">
             <label class="check"><input type="checkbox" name="confirm" value="1" required> أؤكد حذف هذا الاشتراك (للأخطاء فقط)</label>
@@ -399,14 +486,46 @@ function subscriptionsSection(o: { students: Student[]; subs: Subscription[]; pr
             )}</ul>`
           : ""
       }
-      ${alertBox(e[`sub_${s.id}`])}
-      <form method="post" action="/admin/students/${String(s.id)}/subscriptions" class="form sub-form" novalidate>
-        ${select({ name: "package", id: `f-package-${s.id}`, label: "تفعيل باقة بعد الدفع", options: packageOptions(s, o.programs), placeholder: "اختر الباقة" })}
-        ${input({ name: "note", id: `f-subnote-${s.id}`, label: "ملاحظة (اختياري)", maxlength: 200, hint: "مثل: دفع نقدًا يوم 10 جانفي" })}
-        <button class="btn btn-primary btn-sm" type="submit">${icon("check")}تفعيل</button>
-      </form>
     </div>`;
     })}
+
+    ${
+      unpaid.length
+        ? html`<form method="post" action="/admin/families/${String(o.students[0]?.account_id ?? 0)}/payments" class="form sub-form pay-form" novalidate>
+      <h3>تسجيل دفعة</h3>
+      ${alertBox(e.pay_form)}
+      <fieldset class="check-list"><legend class="sr-only">الاشتراكات التي تغطيها الدفعة</legend>
+        ${unpaid.map(
+          (x) => html`<label class="check"><input type="checkbox" name="sub_${String(x.id)}" value="1"${v[`sub_${x.id}`] === "0" ? "" : html` checked`}> ${name(x.student_id)} · ${title(x.program_slug)} · ${KIND_TITLES[x.kind]}</label>`,
+        )}
+      </fieldset>
+      ${paymentFields({ amount: v.pay_amount, receipt: v.pay_receipt }, { amount: e.pay_amount ?? "" }, "f-pay")}
+      <button class="btn btn-primary btn-sm" type="submit">${icon("check")}تسجيل الدفعة</button>
+    </form>`
+        : ""
+    }
+
+    ${
+      kids.length
+        ? html`<form method="post" action="/admin/families/${String(kids[0]!.account_id)}/activate" class="form sub-form" novalidate>
+      <h3>تفعيل أو تجديد</h3>
+      ${alertBox(e.activate)}
+      ${kids.map((s) =>
+        select({ name: `package_${s.id}`, id: `f-package-${s.id}`, label: s.name, options: packageOptions(s, o.programs, o), value: v[`package_${s.id}`] ?? "", error: e[`package_${s.id}`] }),
+      )}
+      ${paymentFields({ amount: v.act_amount, receipt: v.act_receipt }, { amount: e.act_amount ?? "" }, "f-act")}
+      <button class="btn btn-primary btn-sm" type="submit">${icon("check")}تفعيل</button>
+    </form>`
+        : ""
+    }
+
+    ${
+      o.payments.length
+        ? html`<div class="pay-history"><h3>الدفعات</h3><ul class="sub-list">${o.payments.map(
+            (p) => html`<li><span><strong>${formatAmount(p.amount)}</strong><small>${formatDate(p.paid_at)}${p.receipt ? html` · وصل <bdi>${p.receipt}</bdi>` : ""}</small></span></li>`,
+          )}</ul></div>`
+        : ""
+    }
   </section>`;
 }
 
@@ -422,6 +541,7 @@ const DONE_MESSAGES: Record<string, string> = {
   "devices-reset": "حُذفت كل الأجهزة. أول جهاز يدخل منه الولي سيُعتمد تلقائيًا.",
   "pins-cleared": "أُزيلت رموز كل الملفات.",
   "sub-activated": "فُعّل الاشتراك. المحتوى مفتوح للابن الآن.",
+  "paid": "سُجّلت الدفعة.",
   "sub-deleted": "حُذف الاشتراك.",
 };
 
@@ -433,6 +553,8 @@ export function familyPage(
     devices: Device[];
     subs: Subscription[];
     programs: Program[];
+    payments: Payment[];
+    settings: Settings;
     now: number;
     done?: string | null;
     errors?: Record<string, string>;
@@ -491,6 +613,8 @@ ${alertBox(Object.keys(e).length ? "راجع الخانات المشار إلي�
       <form method="post" action="/admin/families/${id}/children" class="form" novalidate>
         ${input({ name: "child_name", label: "الاسم الكامل", value: v.child_name, required: true, error: e.child_name, maxlength: 80 })}
         ${select({ name: "child_level", label: "المستوى", options: LEVEL_OPTIONS, value: v.child_level, placeholder: "اختر المستوى", error: e.child_level })}
+        ${select({ name: "child_package", label: "الاشتراك (يُفعَّل فورًا)", options: levelPackageOptions(o), value: v.child_package ?? defaultPackage(o), error: e.child_package })}
+        ${paymentFields({ amount: v.child_amount, receipt: v.child_receipt }, { amount: e.child_amount ?? "" }, "f-child")}
         <button class="btn btn-primary btn-sm" type="submit">إضافة</button>
       </form>
     </details>

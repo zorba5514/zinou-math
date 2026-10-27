@@ -7,7 +7,7 @@ import { LEVELS, levelTitle } from "./content.ts";
 import { formatPhone } from "./phone.ts";
 import type { Account, Device, Student } from "./db.ts";
 import type { ProgramSummary } from "./content.ts";
-import { statusLabel, subscriptionStatus, type SubStatus, type Subscription } from "./subscriptions.ts";
+import { statusClass, statusLabel, subscriptionStatus, type SubStatus, type Subscription } from "./subscriptions.ts";
 import { whatsappNumber } from "./phone.ts";
 import { on20, visibility, type RecentResult } from "./quiz.ts";
 import { formatDate } from "./subscriptions.ts";
@@ -92,7 +92,7 @@ export function unlockPage(
 // ---------- الاشتراك ----------
 
 export function subPill(st: SubStatus): Raw {
-  const cls = st.state === "active" ? "pill-success" : st.state === "due" ? "pill-warning" : st.state === "expired" ? "pill-danger" : "pill-muted";
+  const cls = statusClass(st);
   return html`<span class="pill pill-wrap ${cls}">${statusLabel(st)}</span>`;
 }
 
@@ -179,13 +179,15 @@ export function parentPage(view: View, account: Account, students: Student[], de
       ${subPill(statusOf(s))}
       ${(() => {
         const st = statusOf(s);
-        if (st.state === "active") return "";
+        if (st.state === "active" && !st.payDue) return "";
         const msg =
-          st.state === "due" || st.state === "expired"
+          st.state === "suspended" || st.payDue
+            ? `السلام عليكم أستاذ، أريد تسديد اشتراك ابني ${s.name} (${levelTitle(s.level)}).`
+            : st.state === "due" || st.state === "expired"
             ? `السلام عليكم أستاذ، أريد تجديد اشتراك ابني ${s.name} (${levelTitle(s.level)}).`
             : `السلام عليكم أستاذ، أريد اشتراك ابني ${s.name} في ${levelTitle(s.level)}.`;
         const link = whatsappLink(x.whatsapp, msg);
-        return link ? html`<a class="btn btn-secondary btn-sm btn-block" href="${link}" target="_blank" rel="noopener">${icon("chat")}${st.state === "none" ? "اشترك عبر واتساب" : "جدّد عبر واتساب"}</a>` : "";
+        return link ? html`<a class="btn btn-secondary btn-sm btn-block" href="${link}" target="_blank" rel="noopener">${icon("chat")}${st.state === "none" ? "اشترك عبر واتساب" : st.state === "suspended" || st.payDue ? "تواصل للدفع عبر واتساب" : "جدّد عبر واتساب"}</a>` : "";
       })()}
       ${selectForm("student", s.id, html`فتح ملفه ${icon("arrowLeft")}`, "btn btn-secondary btn-sm btn-block")}
     </li>`,

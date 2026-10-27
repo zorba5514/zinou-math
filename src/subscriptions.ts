@@ -36,6 +36,17 @@ export interface Subscription {
   note: string | null;
   created_by: number | null;
   created_at: number;
+  /** الدفعة التي غطّته، أو null إن لم يُدفع بعد */
+  payment_id: number | null;
+  /** نصيبه من الدفعة بالدينار */
+  amount: number | null;
+  /** آخر أجل للدفع إن لم يُدفع (null: قديم أو مدفوع) */
+  pay_due_at: number | null;
+}
+
+/** الاشتراك يُحسب: مدفوع، أو قديم بلا أجل، أو ما زال في مهلة الدفع. */
+export function counts(s: Pick<Subscription, "payment_id" | "pay_due_at">, now: number): boolean {
+  return s.payment_id !== null || s.pay_due_at === null || now <= s.pay_due_at;
 }
 
 // ---------- التواريخ (بتوقيت الجزائر) ----------
@@ -132,33 +143,52 @@ export function canOpen(access: Access, item: { free: number; program_slug: stri
 
 // ---------- حالة الاشتراك ----------
 
-export type SubState = "none" | "active" | "due" | "expired";
+export type SubState = "none" | "active" | "due" | "expired" | "suspended";
 
 export interface SubStatus {
   state: SubState;
   /** آخر اشتراك (الأبعد انتهاءً) */
   latest: Subscription | null;
+  /** الاشتراك الساري غير مدفوع بعد: آخر أجل للدفع */
+  payDue?: number | null;
 }
 
 /** حالة اشتراك ابن في مستوى أو دورة، من كل اشتراكاته فيه. */
 export function subscriptionStatus(subs: Subscription[], programSlug: string, now: number): SubStatus {
   const mine = subs.filter((s) => s.program_slug === programSlug && s.starts_at <= now);
   if (!mine.length) return { state: "none", latest: null };
-  const latest = mine.reduce((a, b) => (b.ends_at > a.ends_at ? b : a));
-  if (latest.ends_at < now) return { state: "expired", latest };
-  if (latest.ends_at - now <= DUE_DAYS * DAY) return { state: "due", latest };
-  return { state: "active", latest };
+  const furthest = (list: Subscription[]) => list.reduce((a, b) => (b.ends_at > a.ends_at ? b : a));
+  const valid = mine.filter((s) => counts(s, now));
+  const latest = valid.length ? furthest(valid) : null;
+  if (latest && latest.ends_at >= now) {
+    const payDue = latest.payment_id === null && latest.pay_due_at !== null ? latest.pay_due_at : null;
+    const state = latest.ends_at - now <= DUE_DAYS * DAY ? "due" : "active";
+    return { state, latest, payDue };
+  }
+  // اشتراك ساري التاريخ لكن انتهت مهلة دفعه
+  const unpaid = mine.filter((s) => !counts(s, now) && s.ends_at >= now);
+  if (unpaid.length) return { state: "suspended", latest: furthest(unpaid) };
+  return { state: "expired", latest: furthest(mine) };
 }
 
 export function statusLabel(st: SubStatus): string {
+  const due = st.payDue ? ` · يجب الدفع قبل ${formatDate(st.payDue)}` : "";
   switch (st.state) {
     case "none":
       return "غير مشترك";
     case "expired":
       return `انتهى في ${formatDate(st.latest!.ends_at)}`;
+    case "suspended":
+      return "متوقف: انتهت مهلة الدفع";
     case "due":
-      return st.latest!.kind.startsWith("term") ? `حان وقت دفع الفصل التالي (ينتهي ${formatDate(st.latest!.ends_at)})` : `ينتهي قريبًا: ${formatDate(st.latest!.ends_at)}`;
+      return (st.latest!.kind.startsWith("term") ? `حان وقت دفع الفصل التالي (ينتهي ${formatDate(st.latest!.ends_at)})` : `ينتهي قريبًا: ${formatDate(st.latest!.ends_at)}`) + due;
     default:
-      return `مشترك حتى ${formatDate(st.latest!.ends_at)}`;
+      return `مشترك حتى ${formatDate(st.latest!.ends_at)}${due}`;
   }
+}
+
+export function statusClass(st: SubStatus): string {
+  if (st.state === "expired" || st.state === "suspended") return "pill-danger";
+  if (st.state === "due" || st.payDue) return "pill-warning";
+  return st.state === "active" ? "pill-success" : "pill-muted";
 }

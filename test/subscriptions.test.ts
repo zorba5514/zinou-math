@@ -14,6 +14,11 @@ import {
 } from "../src/subscriptions.ts";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+/** رقم حساب العائلة التجريبية. */
+function famOf(env: TestEnv): number {
+  return Number(env.DB.raw.prepare("SELECT id FROM accounts WHERE phone = '0661223344'").get()?.id);
+}
 const NOW = Date.UTC(2027, 0, 15, 10);
 
 /** تاريخ بصيغة 2027-01-15 بتوقيت الجزائر، بعد عدد من الأيام من الآن. */
@@ -76,6 +81,9 @@ test("حالة الاشتراك: غير مشترك، ساري، حان وقت ا
     note: null,
     created_by: null,
     created_at: starts,
+    payment_id: null,
+    amount: null,
+    pay_due_at: null,
   });
   assert.equal(subscriptionStatus([], "2am", NOW).state, "none");
   assert.equal(subscriptionStatus([sub(1, NOW - DAY, NOW + 30 * DAY)], "2am", NOW).state, "active");
@@ -87,6 +95,13 @@ test("حالة الاشتراك: غير مشترك، ساري، حان وقت ا
   assert.equal(renewed.state, "active");
   assert.equal(renewed.latest?.id, 2);
   assert.equal(subscriptionStatus([sub(1, NOW - DAY, NOW + 30 * DAY)], "3am", NOW).state, "none");
+  // غير مدفوع: ساري في المهلة مع التنبيه، ومتوقف بعدها
+  const unpaid = { ...sub(3, NOW - 2 * DAY, NOW + 60 * DAY), pay_due_at: NOW + 13 * DAY };
+  const inGrace = subscriptionStatus([unpaid], "2am", NOW);
+  assert.equal(inGrace.state, "active");
+  assert.equal(inGrace.payDue, NOW + 13 * DAY);
+  assert.equal(subscriptionStatus([{ ...unpaid, pay_due_at: NOW - 1 }], "2am", NOW).state, "suspended");
+  assert.equal(subscriptionStatus([{ ...unpaid, pay_due_at: NOW - 1, payment_id: 9 }], "2am", NOW).state, "active");
 });
 
 // ---------- على الخادم ----------
@@ -154,16 +169,17 @@ test("تفعيل باقة الفصل: يفتح المحتوى للابن ولو�
   const { parent, id, yacine, maryam } = await family(env, admin);
 
   // بدون تواريخ الفصول: رسالة واضحة
-  const noTerms = await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:term1" });
+  const noTerms = await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:term1", amount: "3000", receipt: "وصل 12" });
   assert.equal(noTerms.status, 400);
   assert.match(await noTerms.text(), /تواريخ نهاية الفصول/);
 
   await setTerms(admin);
-  const ok = await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:term1", note: "دفع نقدًا" });
+  const ok = await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:term1", amount: "3000", receipt: "وصل 12" });
   assert.equal(ok.headers.get("Location"), `/admin/families/${id}?done=sub-activated#subs`);
   const famPage = await (await admin.get(`/admin/families/${id}`)).text();
   assert.match(famPage, /مشترك حتى/);
-  assert.match(famPage, /دفع نقدًا/);
+  assert.match(famPage, /مدفوع · 3[  ]000 دج/);
+  assert.match(famPage, /وصل <bdi>وصل 12<\/bdi>/);
 
   // ياسين يفتح الدرس المدفوع
   await parent.post("/profiles/select", { kind: "student", student_id: String(yacine) });
@@ -180,8 +196,8 @@ test("تفعيل باقة الفصل: يفتح المحتوى للابن ولو�
   assert.equal((await fresh.get("/lessons/100")).status, 302);
 
   // باقة غير صالحة لهذا الابن تُرفض
-  assert.equal((await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "olympiad:term1" })).status, 400);
-  assert.equal((await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "" })).status, 400);
+  assert.equal((await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "olympiad:term1", amount: "3000", receipt: "وصل 12" })).status, 400);
+  assert.equal((await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "", amount: "3000", receipt: "وصل 12" })).status, 400);
 });
 
 test("الدورة: سنة من التفعيل، وتختفي من التوصيات بعد الاشتراك", async () => {
@@ -198,7 +214,7 @@ test("الدورة: سنة من التفعيل، وتختفي من التوصي�
   // الدورة بلا دروس منشورة لا تُقترح
   assert.doesNotMatch(page, /الحساب الذهني/);
 
-  await admin.post(`/admin/students/${maryam}/subscriptions`, { package: "olympiad:course" });
+  await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${maryam}`]: "olympiad:course", amount: "3000", receipt: "وصل 12" });
   const sub = env.DB.raw.prepare("SELECT starts_at, ends_at FROM subscriptions WHERE student_id = ?").get(maryam) as { starts_at: number; ends_at: number };
   assert.equal(sub.ends_at - sub.starts_at, COURSE_MS);
   page = await (await parent.get("/account")).text();
@@ -214,7 +230,7 @@ test("بعد انتهاء الاشتراك: الدرس القديم مفتوح،
   const { b: admin } = await setupAdmin(env);
   await setTerms(admin);
   const { parent, yacine } = await family(env, admin);
-  await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:term1" });
+  await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:term1", amount: "3000", receipt: "وصل 12" });
   // نُرجع الاشتراك إلى الماضي: انتهى قبل 30 يومًا
   const ended = Date.now() - 30 * DAY;
   env.DB.raw.prepare("UPDATE subscriptions SET starts_at = ?, ends_at = ? WHERE student_id = ?").run(ended - 90 * DAY, ended, yacine);
@@ -241,7 +257,7 @@ test("حان وقت الدفع قبل 14 يومًا، والاشتراك يظه�
   const { b: admin } = await setupAdmin(env);
   await setTerms(admin, { term1_end: isoIn(5) });
   const { parent, yacine } = await family(env, admin);
-  await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:term1" });
+  await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:term1", amount: "3000", receipt: "وصل 12" });
 
   await parent.post("/profiles/select", { kind: "parent" });
   const page = await (await parent.get("/account")).text();
@@ -255,7 +271,7 @@ test("حان وقت الدفع قبل 14 يومًا، والاشتراك يظه�
   assert.match(dash, /اشتراكات تنتهي خلال 7 أيام/);
   assert.match(dash, /ياسين بن علي/);
 
-  await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:term2" });
+  await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:term2", amount: "3000", receipt: "وصل 12" });
   dash = await (await admin.get("/admin")).text();
   assert.doesNotMatch(dash, /اشتراكات تنتهي خلال 7 أيام/);
 });
@@ -266,7 +282,7 @@ test("حذف اشتراك (للأخطاء) يحتاج تأكيدًا، ويُق�
   const { b: admin } = await setupAdmin(env);
   await setTerms(admin);
   const { parent, id, yacine } = await family(env, admin);
-  await admin.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:year" });
+  await admin.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:year", amount: "3000", receipt: "وصل 12" });
   const subId = Number(env.DB.raw.prepare("SELECT id FROM subscriptions WHERE student_id = ?").get(yacine)?.id);
   await admin.post(`/admin/subscriptions/${subId}/delete`, {});
   assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM subscriptions").get()?.n, 1);
@@ -274,7 +290,7 @@ test("حذف اشتراك (للأخطاء) يحتاج تأكيدًا، ويُق�
   await parent.post("/profiles/select", { kind: "student", student_id: String(yacine) });
   assert.equal((await parent.get("/lessons/100")).status, 302);
   // الولي لا يستطيع تفعيل اشتراك بنفسه
-  assert.equal((await parent.post(`/admin/students/${yacine}/subscriptions`, { package: "2am:year" })).status, 404);
+  assert.equal((await parent.post(`/admin/families/${famOf(env)}/activate`, { [`package_${yacine}`]: "2am:year", amount: "3000", receipt: "وصل 12" })).status, 404);
 });
 
 test("نشر الدرس يسجل أول تاريخ نشر ولا يغيّره عند الإخفاء وإعادة النشر", async () => {

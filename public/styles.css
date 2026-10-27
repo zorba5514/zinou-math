@@ -666,3 +666,15 @@ a, button, label, summary { touch-action: manipulation; }
 .seg-group { display: inline-flex; padding: 3px; border-radius: var(--radius-pill); background: rgba(255, 255, 255, .1); }
 .seg { min-height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; font: inherit; font-size: 14px; cursor: pointer; }
 .seg-on { background: #FBBF24; color: #16181D; font-weight: 700; }
+
+/* ---------- الدفع ---------- */
+.pay-fields { display: grid; gap: 12px; }
+@media (min-width: 720px) { .pay-fields { grid-template-columns: 1fr 1fr; align-items: start; } }
+.sub-form h3, .pay-history h3 { margin: 0 0 8px; font-size: 17px; }
+.sub-form, .pay-history { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.check-list { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sub-list li .pill { margin-top: 4px; }
+select.input { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
+.sub-form, .pay-form, .form-card { min-width: 0; }
+.sub-list li > span { min-width: 0; }
+.sub-list .pill { white-space: normal; }

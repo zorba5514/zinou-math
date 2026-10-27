@@ -9,6 +9,9 @@ compatibility_date = "2026-10-01"
 directory = "./public"
 binding = "ASSETS"
 
+[placement]
+mode = "smart"
+
 [vars]
 APP_ENV = "production"
 PASSWORD_ITERATIONS = "100000"
@@ -17,6 +20,9 @@ PASSWORD_ITERATIONS = "100000"
 [env.staging]
 name = "zinou-math-staging"
 workers_dev = true
+# الخادم يعمل بجوار قاعدة البيانات (أوروبا الغربية) بدل أقرب مركز للزائر:
+# رحلة واحدة من الزائر، ثم كل استعلامات الصفحة محلية تقريبًا
+placement = { mode = "smart" }
 
 [env.staging.vars]
 APP_ENV = "staging"
