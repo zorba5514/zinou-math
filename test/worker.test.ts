@@ -46,7 +46,11 @@ test("فحص الصحة يرد بحالة سليمة واسم البيئة", asy
   const res = await get("/api/health");
   assert.equal(res.status, 200);
   assert.match(res.headers.get("Content-Type") ?? "", /application\/json/);
-  assert.deepEqual(await res.json(), { status: "ok", environment: "test", database: "ok" });
+  const body = await res.json();
+  assert.equal(body.status, "ok");
+  assert.equal(body.environment, "test");
+  assert.equal(body.database, "ok");
+  assert.equal(typeof body.db_ms, "number");
 });
 
 test("فحص الصحة يرفض الطرق غير GET", async () => {

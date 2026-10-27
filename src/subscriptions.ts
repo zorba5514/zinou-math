@@ -97,13 +97,20 @@ export interface Access {
 
 export const NO_ACCESS: Access = { all: false, subs: [], now: 0 };
 
-export async function loadAccess(db: D1Database, studentIds: number[], now: number): Promise<Access> {
-  if (!studentIds.length) return { all: false, subs: [], now };
-  const r = await db
-    .prepare(`SELECT program_slug, starts_at, ends_at FROM subscriptions WHERE student_id IN (${studentIds.map(() => "?").join(",")})`)
-    .bind(...studentIds)
-    .all<Access["subs"][number]>();
-  return { all: false, subs: r.results, now };
+/**
+ * اشتراكات ابن أو كل أبناء حساب، التي تحسب في الفتح:
+ * المدفوعة، أو التي ما زالت في مهلة الدفع (الاشتراك غير المدفوع يتوقف بعد المهلة).
+ */
+export function accessStatement(db: D1Database, who: { studentId: number } | { accountId: number }, now: number) {
+  const paid = "(s.payment_id IS NOT NULL OR s.pay_due_at IS NULL OR s.pay_due_at >= ?)";
+  return "studentId" in who
+    ? db.prepare(`SELECT s.program_slug, s.starts_at, s.ends_at FROM subscriptions s WHERE s.student_id = ? AND ${paid}`).bind(who.studentId, now)
+    : db
+        .prepare(
+          `SELECT s.program_slug, s.starts_at, s.ends_at FROM subscriptions s JOIN students st ON st.id = s.student_id
+           WHERE st.account_id = ? AND st.status = 'active' AND ${paid}`,
+        )
+        .bind(who.accountId, now);
 }
 
 /** وقت ظهور الدرس للعامة: آخر الاثنين، نشر الدرس ونشر مقطعه. */

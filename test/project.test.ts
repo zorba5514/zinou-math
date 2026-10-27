@@ -43,7 +43,7 @@ test("الصفحة الرئيسية تعرض الشعار واسم المنصة 
 test("الصفحات لا تحتوي تنسيقًا أو كودًا مضمّنًا تمنعه سياسة المحتوى", () => {
   const page = homePage({ env: "staging", viewer: null }, []);
   for (const tag of page.match(/<script[^>]*>/g) ?? []) {
-    assert.match(tag, /src="\/app\.js"/, tag);
+    assert.match(tag, /src="\/(app|nav)\.js"/, tag);
   }
   assert.doesNotMatch(page, /<script[^>]*>[^<]+<\/script>/);
   assert.doesNotMatch(page, /<style/);

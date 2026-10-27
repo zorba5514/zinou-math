@@ -30,6 +30,27 @@ export interface View {
   viewer: Viewer | null;
   /** ما يحق لمن يتصفح فتحه من المحتوى المدفوع (اشتراكاته أو اشتراكات أبنائه). */
   access?: Access;
+  /** الأستاذ يعاين الموقع كما يراه تلميذ مشترك أو غير مشترك. */
+  preview?: "subscribed" | "free" | null;
+  /** مسار الصفحة الحالية (للعودة إليها بعد تبديل المعاينة) */
+  path?: string;
+}
+
+/** الأستاذ في عرضه العادي (يرى المسودات ورسائل المعاينة)، لا في وضع «عرض كتلميذ». */
+export function isTeacherView(view: View): boolean {
+  return view.viewer?.role === "admin" && !view.preview;
+}
+
+function previewBar(view: View): Raw {
+  if (view.viewer?.role !== "admin") return html``;
+  const mode = view.preview ?? "teacher";
+  const option = (value: string, label: string) =>
+    html`<button class="seg${mode === value ? " seg-on" : ""}" type="submit" name="mode" value="${value}"${mode === value ? html` aria-pressed="true"` : html` aria-pressed="false"`}>${label}</button>`;
+  return html`<form method="post" action="/preview" class="preview-bar" aria-label="عرض الموقع">
+  <input type="hidden" name="back" value="${view.path ?? "/"}">
+  <span class="preview-label">${icon("eye", "icon icon-sm")}العرض:</span>
+  <span class="seg-group">${option("teacher", "أستاذ")}${option("subscribed", "تلميذ مشترك")}${option("free", "تلميذ غير مشترك")}</span>
+</form>`;
 }
 
 export type NavKey =
@@ -146,11 +167,13 @@ ${staging || area === "admin" ? html`<meta name="robots" content="noindex">` : "
 <link rel="preload" href="/fonts/tajawal-ar-800.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/styles.css">
 ${opts.body.value.includes('class="katex') || (opts.scripts ?? []).some((x) => x.startsWith("/katex/")) ? html`<link rel="stylesheet" href="/katex/katex.min.css">` : ""}
+<script type="module" src="/nav.js"></script>
 ${(opts.scripts ?? []).map((src) => html`<script type="module" src="${src}"></script>`)}
 </head>
 <body>
 <a class="skip" href="#main">تخطَّ إلى المحتوى</a>
 ${staging ? html`<p class="staging">نسخة الاختبار: المحتوى المعروض تجريبي.</p>` : ""}
+${area === "public" ? previewBar(opts.view) : ""}
 <div class="shell">
   <aside id="drawer" class="drawer" popover aria-label="القائمة">
     <button class="drawer-close" type="button" popovertarget="drawer" popovertargetaction="hide" aria-label="إغلاق القائمة">${icon("x")}</button>

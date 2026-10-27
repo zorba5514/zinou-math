@@ -2,8 +2,8 @@
 // الملفات الثابتة (الشعار، التنسيق) تقدّمها Cloudflare مباشرة من مجلد public.
 // كل طلب آخر يصل إلى هنا: الصفحات تُبنى في الخادم، وطلبات /api/* للبيانات.
 
-import { getLesson, getProgram, isPublished, listPrograms, programUnits, type Lesson, type LessonContext } from "./content.ts";
-import { NO_ACCESS, canOpen, getSettings, loadAccess, visibleSince } from "./subscriptions.ts";
+import { getLesson, isPublished, listPrograms, programWithUnits, type Lesson, type LessonContext } from "./content.ts";
+import { NO_ACCESS, accessStatement, canOpen, getSettings, visibleSince, type Access } from "./subscriptions.ts";
 import { homePage, lessonPage, levelsPage, notFoundPage, programPage, subscribePage } from "./pages.ts";
 import { currentSession } from "./auth.ts";
 import { handleAuthRoutes, type Ctx } from "./auth-routes.ts";
@@ -11,8 +11,8 @@ import { handleAdminRoutes } from "./admin-routes.ts";
 import { handleFamilyRoutes } from "./family-routes.ts";
 import { handleQuizRoutes, quizIntro } from "./quiz-routes.ts";
 import { messagePage } from "./auth-pages.ts";
-import { SECURITY_HEADERS, isSameOrigin, json, page, redirect, type Env } from "./http.ts";
-import type { View, Viewer } from "./ui.ts";
+import { SECURITY_HEADERS, field, isSameOrigin, json, page, readForm, redirect, safeNext, type Env } from "./http.ts";
+import { isTeacherView, type View, type Viewer } from "./ui.ts";
 import type { Student } from "./db.ts";
 
 export { PAGE_CSP, SECURITY_HEADERS, json, page, type Env } from "./http.ts";
@@ -39,19 +39,54 @@ export const SPECULATION_RULES = {
       eagerness: "moderate",
     },
   ],
+  // صفحات الحساب ولوحة التحكم: تُجلب لحظة لمس الرابط فقط، فتصل أسرع وتبقى حديثة
+  prefetch: [
+    {
+      where: {
+        and: [
+          { href_matches: "/*" },
+          { not: { href_matches: "/files/*" } },
+          { not: { href_matches: "/attempts/*/upload" } },
+          { not: { href_matches: "/login*" } },
+          { not: { href_matches: "/setup" } },
+        ],
+      },
+      eagerness: "conservative",
+    },
+  ],
 };
 
 async function handleApi(request: Request, env: Env, path: string): Promise<Response> {
   if (path === "/api/health") {
     if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
-    // يتأكد أن قاعدة البيانات متصلة وأن الجداول موجودة
+    // يتأكد أن قاعدة البيانات متصلة وأن الجداول موجودة، ويقيس زمن الرحلة إليها
     let database = "ok";
+    let dbMs: number | null = null;
+    let dbRegion: string | null = null;
     try {
-      await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").first();
+      const t0 = Date.now();
+      const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts").all();
+      await env.DB.prepare("SELECT 1").first();
+      await env.DB.prepare("SELECT 1").first();
+      dbMs = Math.round((Date.now() - t0) / 3);
+      dbRegion = r.meta.served_by_region ?? r.meta.served_by ?? null;
     } catch {
       database = "error";
     }
-    return json({ status: database === "ok" ? "ok" : "degraded", environment: env.APP_ENV, database }, database === "ok" ? 200 : 503);
+    const cf = (request as unknown as { cf?: { colo?: string; country?: string } }).cf;
+    return json(
+      {
+        status: database === "ok" ? "ok" : "degraded",
+        environment: env.APP_ENV,
+        database,
+        // للتشخيص: مركز Cloudflare الذي خدم الطلب، وزمن رحلة واحدة إلى قاعدة البيانات
+        colo: cf?.colo ?? null,
+        country: cf?.country ?? null,
+        db_ms: dbMs,
+        db_region: dbRegion,
+      },
+      database === "ok" ? 200 : 503,
+    );
   }
   return json({ error: "not_found" }, 404);
 }
@@ -60,7 +95,7 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
   const { path, url, view } = ctx;
   const db = ctx.env.DB;
   // الأستاذ يرى المسودات أيضًا (معاينة)، والبقية يرون المنشور فقط
-  const isAdmin = view.viewer?.role === "admin";
+  const isAdmin = isTeacherView(view);
   if (path === "/") return page(homePage(view, await listPrograms(db)));
   if (path === "/levels") return page(levelsPage(view, await listPrograms(db)));
   if (path === "/subscribe") {
@@ -71,9 +106,9 @@ async function publicRoutes(ctx: Ctx): Promise<Response | null> {
   }
   const programMatch = /^\/levels\/([a-z0-9-]+)$/.exec(path);
   if (programMatch) {
-    const program = await getProgram(db, programMatch[1] ?? "");
-    if (!program) return page(notFoundPage(view), 404);
-    return page(programPage(view, program, await programUnits(db, program.slug, { drafts: isAdmin })));
+    const data = await programWithUnits(db, programMatch[1] ?? "", { drafts: isAdmin });
+    if (!data) return page(notFoundPage(view), 404);
+    return page(programPage(view, data.program, data.units));
   }
   const lessonMatch = /^\/lessons\/(\d{1,12})$/.exec(path);
   if (lessonMatch) {
@@ -103,7 +138,7 @@ function mayOpen(ctx: Ctx, c: LessonContext): boolean {
 /** ملف PDF لدرس: نفس قواعد الدرس (منشور، ومن يحق له)، وحسب طريقة الإتاحة التي اختارها الأستاذ. */
 async function serveFile(ctx: Ctx, id: number): Promise<Response> {
   const { view } = ctx;
-  const isAdmin = view.viewer?.role === "admin";
+  const isAdmin = isTeacherView(view);
   const found = await getLesson(ctx.env.DB, id);
   if (!found || found.lesson.kind !== "pdf" || !found.lesson.file_key || (!isPublished(found) && !isAdmin)) {
     return page(notFoundPage(view), 404);
@@ -149,28 +184,31 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   const current = await currentSession(env.DB, request, now);
   const user = current?.session.stage === "full" ? current : null;
   let viewer: Viewer | null = null;
+  // ما يحق لمن يتصفح فتحه: الأستاذ كل شيء، والابن اشتراكاته، والولي اشتراكات كل أبنائه
+  let access: Access = { ...NO_ACCESS, now };
   if (user) {
     viewer = { name: user.account.name, role: user.account.role, profile: null };
-    if (user.account.role === "parent" && user.session.profile_kind === "parent") viewer.profile = "parent";
+    // معاينة «تلميذ غير مشترك»: لا يُفتح إلا المجاني
+    if (user.account.role === "admin") access = user.session.preview === "free" ? { ...NO_ACCESS, now } : { all: true, subs: [], now };
+    if (user.account.role === "parent" && user.session.profile_kind === "parent") {
+      viewer.profile = "parent";
+      access = { all: false, subs: (await accessStatement(env.DB, { accountId: user.account.id }, now).all<Access["subs"][number]>()).results, now };
+    }
     if (user.account.role === "parent" && user.session.profile_kind === "student" && user.session.student_id !== null) {
-      // اسم الابن يظهر في القائمة؛ ابن موقوف أو محذوف يعني أن الملف لم يعد صالحًا
-      const student = await env.DB
-        .prepare("SELECT * FROM students WHERE id = ? AND account_id = ? AND status = 'active'")
-        .bind(user.session.student_id, user.account.id)
-        .first<Student>();
-      if (student) viewer = { ...viewer, name: student.name, profile: "student" };
+      // اسم الابن واشتراكاته في رحلة واحدة. ابن موقوف أو محذوف يعني أن الملف لم يعد صالحًا
+      const [studentRes, subsRes] = await env.DB.batch([
+        env.DB.prepare("SELECT * FROM students WHERE id = ? AND account_id = ? AND status = 'active'").bind(user.session.student_id, user.account.id),
+        accessStatement(env.DB, { studentId: user.session.student_id }, now),
+      ]);
+      const student = studentRes?.results[0] as unknown as Student | undefined;
+      if (student) {
+        viewer = { ...viewer, name: student.name, profile: "student" };
+        access = { all: false, subs: (subsRes?.results ?? []) as Access["subs"], now };
+      }
     }
   }
-  // ما يحق لمن يتصفح فتحه: الأستاذ كل شيء، والابن اشتراكاته، والولي اشتراكات كل أبنائه
-  let access = { ...NO_ACCESS, now };
-  if (user?.account.role === "admin") access = { all: true, subs: [], now };
-  else if (user && viewer?.profile === "student" && user.session.student_id !== null) {
-    access = await loadAccess(env.DB, [user.session.student_id], now);
-  } else if (user && viewer?.profile === "parent") {
-    const kids = await env.DB.prepare("SELECT id FROM students WHERE account_id = ? AND status = 'active'").bind(user.account.id).all<{ id: number }>();
-    access = await loadAccess(env.DB, kids.results.map((k) => k.id), now);
-  }
-  const view: View = { env: env.APP_ENV, viewer, access };
+  const preview = user?.account.role === "admin" && (user.session.preview === "subscribed" || user.session.preview === "free") ? user.session.preview : null;
+  const view: View = { env: env.APP_ENV, viewer, access, preview, path };
 
   if (method === "POST" && !isSameOrigin(request)) {
     return page(messagePage(view, "طلب مرفوض", "أُرسل هذا النموذج من خارج الموقع، فرُفض حمايةً لحسابك.", "error"), 403);
@@ -187,6 +225,14 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   // كلمة مرور العائلة يغيّرها الولي فقط، لا من ملف أحد الأبناء
   if (user?.account.role === "parent" && viewer?.profile === "student" && path === "/account/password") {
     return redirect("/home");
+  }
+
+  if (path === "/preview" && method === "POST") {
+    if (user?.account.role !== "admin") return page(notFoundPage(view), 404);
+    const form = await readForm(request);
+    const mode = field(form, "mode");
+    await env.DB.prepare("UPDATE sessions SET preview = ? WHERE id = ?").bind(mode === "subscribed" || mode === "free" ? mode : null, user.session.id).run();
+    return redirect(safeNext(field(form, "back"), "/"));
   }
 
   const routed = (await handleAuthRoutes(ctx)) ?? (await handleAdminRoutes(ctx)) ?? (await handleFamilyRoutes(ctx)) ?? (await handleQuizRoutes(ctx));

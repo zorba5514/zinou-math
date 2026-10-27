@@ -117,19 +117,31 @@ export async function getProgram(db: D1Database, slug: string): Promise<Program 
 
 /** مقاطع المستوى بدروسها، مرتبة. للزوار: المنشور فقط. */
 export async function programUnits(db: D1Database, slug: string, opts: { drafts?: boolean } = {}): Promise<UnitWithLessons[]> {
-  const units = await db
-    .prepare(`SELECT * FROM units WHERE program_slug = ? ${opts.drafts ? "" : "AND status = 'published'"} ORDER BY position, id`)
-    .bind(slug)
-    .all<Unit>();
-  if (!units.results.length) return [];
-  const ids = units.results.map((u) => u.id);
-  const lessons = await db
-    .prepare(
-      `SELECT * FROM lessons WHERE unit_id IN (${ids.map(() => "?").join(",")}) ${opts.drafts ? "" : "AND status = 'published'"} ORDER BY position, id`,
-    )
-    .bind(...ids)
-    .all<Lesson>();
-  return units.results.map((u) => ({ ...u, lessons: lessons.results.filter((l) => l.unit_id === u.id) }));
+  return (await programWithUnits(db, slug, opts))?.units ?? [];
+}
+
+/** المستوى ومقاطعه ودروسه في رحلة واحدة إلى قاعدة البيانات. */
+export async function programWithUnits(
+  db: D1Database,
+  slug: string,
+  opts: { drafts?: boolean } = {},
+): Promise<{ program: Program; units: UnitWithLessons[] } | null> {
+  const unitFilter = opts.drafts ? "" : "AND status = 'published'";
+  const [pRes, uRes, lRes] = await db.batch([
+    db.prepare("SELECT * FROM programs WHERE slug = ?").bind(slug),
+    db.prepare(`SELECT * FROM units WHERE program_slug = ? ${unitFilter} ORDER BY position, id`).bind(slug),
+    db
+      .prepare(
+        `SELECT * FROM lessons WHERE unit_id IN (SELECT id FROM units WHERE program_slug = ? ${unitFilter})
+         ${opts.drafts ? "" : "AND status = 'published'"} ORDER BY position, id`,
+      )
+      .bind(slug),
+  ]);
+  const program = pRes?.results[0] as unknown as Program | undefined;
+  if (!program) return null;
+  const units = (uRes?.results ?? []) as unknown as Unit[];
+  const lessons = (lRes?.results ?? []) as unknown as Lesson[];
+  return { program, units: units.map((u) => ({ ...u, lessons: lessons.filter((l) => l.unit_id === u.id) })) };
 }
 
 export interface LessonContext {
@@ -139,13 +151,16 @@ export interface LessonContext {
 }
 
 export async function getLesson(db: D1Database, id: number): Promise<LessonContext | null> {
-  const lesson = await db.prepare("SELECT * FROM lessons WHERE id = ?").bind(id).first<Lesson>();
-  if (!lesson) return null;
-  const unit = await db.prepare("SELECT * FROM units WHERE id = ?").bind(lesson.unit_id).first<Unit>();
-  if (!unit) return null;
-  const program = await getProgram(db, unit.program_slug);
-  if (!program) return null;
-  return { lesson, unit, program };
+  // الدرس ومقطعه ومستواه في رحلة واحدة
+  const [lRes, uRes, pRes] = await db.batch([
+    db.prepare("SELECT * FROM lessons WHERE id = ?").bind(id),
+    db.prepare("SELECT * FROM units WHERE id = (SELECT unit_id FROM lessons WHERE id = ?)").bind(id),
+    db.prepare("SELECT * FROM programs WHERE slug = (SELECT u.program_slug FROM units u JOIN lessons l ON l.unit_id = u.id WHERE l.id = ?)").bind(id),
+  ]);
+  const lesson = lRes?.results[0] as unknown as Lesson | undefined;
+  const unit = uRes?.results[0] as unknown as Unit | undefined;
+  const program = pRes?.results[0] as unknown as Program | undefined;
+  return lesson && unit && program ? { lesson, unit, program } : null;
 }
 
 /** الدرس ظاهر للعامة: منشور، في مقطع منشور. */

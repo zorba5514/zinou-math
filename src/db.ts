@@ -4,7 +4,7 @@
 export interface D1Result<T = Record<string, unknown>> {
   results: T[];
   success: boolean;
-  meta: { changes?: number; last_row_id?: number };
+  meta: { changes?: number; last_row_id?: number; served_by?: string; served_by_region?: string };
 }
 
 export interface D1PreparedStatement {

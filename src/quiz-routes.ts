@@ -74,7 +74,9 @@ export async function quizIntro(ctx: Ctx, c: LessonContext): Promise<Response> {
     for (const r of rows) attempts.push({ attempt: await closeIfExpired(db, quiz, r, ctx.now), student: r.student_name });
     message = "يجتاز الاختبارَ الابنُ من ملفه. هنا تتابع نتائج أبنائك.";
   } else if (ctx.view.viewer?.role === "admin") {
-    message = "هذه معاينة. لتعديل الأسئلة أو رؤية النتائج افتح الاختبار من لوحة التحكم.";
+    message = ctx.view.preview
+      ? "في وضع «عرض كتلميذ» ترى صفحة الاختبار كما يراها التلميذ، لكن الاجتياز يكون من ملف تلميذ حقيقي."
+      : "هذه معاينة. لتعديل الأسئلة أو رؤية النتائج افتح الاختبار من لوحة التحكم.";
   } else if (!ctx.view.viewer) {
     message = "ادخل بحساب العائلة، ثم اختر ملف التلميذ لاجتياز الاختبار.";
   } else {

@@ -642,3 +642,27 @@ select.input { appearance: none; padding-inline-end: 44px; background-image: url
 .result-hero { text-align: center; }
 .big-score { margin: 10px 0 0; font-size: 56px; font-weight: 800; line-height: 1; }
 .big-score small { font-size: 22px; color: var(--label); }
+
+/* ---------- الإحساس الفوري عند الضغط ---------- */
+html { -webkit-tap-highlight-color: transparent; }
+a, button, label, summary { touch-action: manipulation; }
+.btn, .item, .program-card, .profile-card, .nav-item, .action-row, .icon-btn, .tool, .key, .option, .seg, .drawer-card {
+  transition: transform 120ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out;
+}
+.btn:active, .item:active, .program-card:active, .profile-card:active, .nav-item:active, .action-row:active, .icon-btn:active, .tool:active, .key:active, .option:active, .seg:active, .drawer-card:active {
+  transform: scale(.97);
+}
+.nav-progress { position: fixed; inset-inline: 0; top: 0; height: 3px; z-index: 1000; pointer-events: none; transform-origin: right; transform: scaleX(0); background: var(--brand-strong); opacity: 0; }
+.nav-progress.run { opacity: 1; animation: nav-progress 2.5s cubic-bezier(.1, .7, .2, 1) forwards; }
+@keyframes nav-progress { from { transform: scaleX(0); } to { transform: scaleX(.9); } }
+.btn.is-busy { position: relative; color: transparent !important; }
+.btn.is-busy > * { visibility: hidden; }
+.btn.is-busy::after { content: ""; position: absolute; inset: 0; margin: auto; width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid currentColor; border-color: var(--ink) var(--ink) transparent transparent; animation: spin 700ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* شريط المعاينة للأستاذ */
+.preview-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 10px; margin: 0; padding: 6px 12px; background: var(--ink); color: var(--bg); font-size: 14px; }
+.preview-label { display: inline-flex; align-items: center; gap: 4px; opacity: .85; }
+.seg-group { display: inline-flex; padding: 3px; border-radius: var(--radius-pill); background: rgba(255, 255, 255, .1); }
+.seg { min-height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-pill); background: transparent; color: inherit; font: inherit; font-size: 14px; cursor: pointer; }
+.seg-on { background: #FBBF24; color: #16181D; font-weight: 700; }

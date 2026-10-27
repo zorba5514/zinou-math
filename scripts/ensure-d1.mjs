@@ -40,3 +40,12 @@ if (!pattern.test(config)) {
 }
 writeFileSync("wrangler.toml", config.replace(pattern, `$1"${db.uuid}"`));
 console.log(`قاعدة البيانات ${name}: ${db.uuid}`);
+// للتشخيص: مكان قاعدة البيانات (يؤثر في سرعة كل صفحة)
+try {
+  const info = wrangler(["d1", "info", name, "--json"]);
+  const data = JSON.parse(info.slice(info.indexOf("{")));
+  const where = data.running_in_region ?? data.region ?? data.primary_location_hint ?? "غير معروف";
+  console.log(`::notice title=مكان قاعدة البيانات::${name}: ${where} ${JSON.stringify(data).slice(0, 400)}`);
+} catch {
+  console.log("تعذّر قراءة معلومات قاعدة البيانات");
+}

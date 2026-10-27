@@ -43,6 +43,7 @@ export interface SessionRow {
   device_id: number | null;
   profile_kind: "parent" | "student" | null;
   student_id: number | null;
+  preview: "subscribed" | "free" | null;
   created_at: number;
   expires_at: number;
   last_seen_at: number;
@@ -84,13 +85,19 @@ export async function currentSession(db: D1Database, request: Request, now = Dat
   const token = readCookies(request).get(SESSION_COOKIE);
   if (!token || token.length < 20 || token.length > 100) return null;
   const id = await sha256(token);
-  const session = await db.prepare("SELECT * FROM sessions WHERE id = ?").bind(id).first<SessionRow>();
+  // الجلسة والحساب والجهاز في رحلة واحدة إلى قاعدة البيانات بدل ثلاث
+  const [sRes, aRes, dRes] = await db.batch([
+    db.prepare("SELECT * FROM sessions WHERE id = ?").bind(id),
+    db.prepare("SELECT * FROM accounts WHERE id = (SELECT account_id FROM sessions WHERE id = ?)").bind(id),
+    db.prepare("SELECT status FROM devices WHERE id = (SELECT device_id FROM sessions WHERE id = ?)").bind(id),
+  ]);
+  const session = (sRes?.results[0] as unknown as SessionRow | undefined) ?? null;
   if (!session || session.expires_at <= now) return null;
-  const account = await db.prepare("SELECT * FROM accounts WHERE id = ?").bind(session.account_id).first<Account>();
+  const account = (aRes?.results[0] as unknown as Account | undefined) ?? null;
   if (!account || account.status !== "active") return null;
   // جلسة مرتبطة بجهاز: يجب أن يبقى الجهاز معتمدًا (حذفه يحذف الجلسة أصلًا)
   if (session.stage === "full" && session.device_id !== null) {
-    const device = await db.prepare("SELECT status FROM devices WHERE id = ?").bind(session.device_id).first<{ status: string }>();
+    const device = dRes?.results[0] as { status: string } | undefined;
     if (device?.status !== "approved") return null;
   }
   if (now - session.last_seen_at > 10 * MINUTE) {

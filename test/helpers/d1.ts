@@ -40,6 +40,10 @@ class Statement implements D1PreparedStatement {
     return { results: [], success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
   }
   runSync(): D1Result {
+    // مثل D1: الاستعلامات في batch تُرجع صفوفها
+    if (/^\s*(SELECT|WITH)\b/i.test(this.sql)) {
+      return { results: this.stmt().all(...this.values) as Record<string, unknown>[], success: true, meta: {} };
+    }
     const r = this.stmt().run(...this.values);
     return { results: [], success: true, meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
   }
