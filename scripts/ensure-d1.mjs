@@ -14,8 +14,8 @@ if (!name) {
   process.exit(1);
 }
 
-function wrangler(args) {
-  return execFileSync("npx", ["wrangler", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] });
+function wrangler(args, quiet = false) {
+  return execFileSync("npx", ["wrangler", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", quiet ? "pipe" : "inherit"] });
 }
 
 function findDatabase(dbName = name) {
@@ -43,11 +43,16 @@ if (db && copyFrom && findDatabase(copyFrom) && tableCount(name) === 0) {
   try {
     wrangler(["d1", "export", copyFrom, "--remote", "--output", "d1-copy.sql"]);
     if (!existsSync("d1-copy.sql") || statSync("d1-copy.sql").size === 0) throw new Error("ملف النسخ فارغ");
-    wrangler(["d1", "execute", name, "--remote", "--file", "d1-copy.sql"]);
+    wrangler(["d1", "execute", name, "--remote", "--file", "d1-copy.sql"], true);
     console.log(`::notice title=نقل قاعدة البيانات::نُسخت بيانات ${copyFrom} إلى ${name} (${LOCATION}). القاعدة القديمة باقية دون تغيير.`);
   } catch (e) {
     // نسخ ناقص: نحذف الجديدة حتى يُعاد النسخ كاملًا في النشر التالي، ولا ننشر على قاعدة ناقصة
-    console.log(`::error title=نقل قاعدة البيانات::فشل النسخ: ${String(e.message ?? e).slice(0, 300)}`);
+    const detail = `${e.stdout ?? ""}\n${e.stderr ?? ""}`.replace(/%/g, "%25").replace(/\r?\n/g, "%0A").slice(-1500);
+    console.log(`::error title=نقل قاعدة البيانات::فشل النسخ: ${String(e.message ?? e).slice(0, 200)}%0A${detail}`);
+    if (existsSync("d1-copy.sql")) {
+      const head = readFileSync("d1-copy.sql", "utf8").split("\n").slice(0, 12).join("%0A").slice(0, 1500);
+      console.log(`::notice title=بداية ملف النسخ::${head}`);
+    }
     try {
       wrangler(["d1", "delete", name, "--skip-confirmation"]);
     } catch {}
