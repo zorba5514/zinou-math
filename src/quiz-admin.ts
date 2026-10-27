@@ -36,6 +36,7 @@ import {
   type ResultsMode,
 } from "./quiz.ts";
 import { answerView } from "./quiz-pages.ts";
+import { handleImport, importCard, uploadImport } from "./quiz-import.ts";
 import type { Ctx } from "./auth-routes.ts";
 
 /** صفحات الأسئلة تحتاج KaTeX للمعاينة، ومحرر الأسئلة. */
@@ -75,7 +76,15 @@ export async function handleQuizAdmin(ctx: Ctx): Promise<Response | null> {
     if (action === "new") return method === "POST" ? saveQuestion(ctx, c, null) : newQuestion(ctx, c);
     if (action === "results" && method === "GET") return showResults(ctx, c);
     if (action === "release" && method === "POST") return toggleRelease(ctx, c);
+    if (action === "import" && method === "POST") return uploadImport(ctx, c.quiz.id, (error) => showEditor(ctx, c, { importError: error }, 400));
     return page(notFoundPage(ctx.view), 404);
+  }
+  const impMatch = /^\/admin\/imports\/(\d{1,12})$/.exec(path);
+  if (impMatch) {
+    return handleImport(ctx, Number(impMatch[1]), async (quizId) => {
+      const c = await loadContext(ctx, quizId);
+      return c ? { crumbs: crumbs(c, "استيراد من Excel"), title: c.lesson.title, quizId, preview: (q) => questionPreview(q) } : null;
+    });
   }
   const qMatch = /^\/admin\/questions\/(\d{1,12})(?:\/([a-z-]+))?$/.exec(path);
   if (qMatch) {
@@ -134,7 +143,7 @@ function questionPreview(q: Question, showAnswer = true): Raw {
   return html`<div class="q-text">${mathText(q.text)}</div>${answer}`;
 }
 
-async function showEditor(ctx: Ctx, c: QuizContext, extra: { errors?: Record<string, string> } = {}, status = 200): Promise<Response> {
+async function showEditor(ctx: Ctx, c: QuizContext, extra: { errors?: Record<string, string>; importError?: string } = {}, status = 200): Promise<Response> {
   const db = ctx.env.DB;
   const questions = await loadQuestions(db, c.quiz.id);
   const counts = await db
@@ -151,7 +160,8 @@ async function showEditor(ctx: Ctx, c: QuizContext, extra: { errors?: Record<str
       c.lesson.title,
       "content",
       html`${crumbs(c)}
-${alertBox(done ? DONE[done] : null, "success")}
+${alertBox(done === "imported" ? `أُضيف ${Number(ctx.url.searchParams.get("n")) || 0} سؤال من ملف Excel.` : done ? DONE[done] : null, "success")}
+${alertBox(extra.importError ?? null)}
 <header class="page-head page-head-row">
   <div><h1>${c.lesson.title}</h1><p class="muted">${questions.length} أسئلة · المجموع ${formatPoints(total)} نقطة${c.lesson.status === "draft" ? " · مسودة" : " · منشور"}</p></div>
   <div class="actions actions-tight">
@@ -189,6 +199,7 @@ ${(counts?.n ?? 0) > 0 ? alertBox("اجتاز تلاميذ هذا الاختبا
       (t) => html`<a class="btn btn-secondary btn-sm" href="/admin/quizzes/${String(q.id)}/new?type=${t}">${icon("plus", "icon icon-sm")}${QUESTION_TYPES[t]}</a>`,
     )}</div>
   </div>
+  ${importCard(q.id)}
 </section>
 
 <section class="card form-card section" aria-labelledby="set-title">

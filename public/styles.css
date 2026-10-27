@@ -719,3 +719,11 @@ select.input { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellips
 .ai-note-ok { border-color: var(--success-ink); background: var(--success-soft); }
 .ai-note-no { border-color: var(--danger-ink); background: var(--danger-soft); }
 .ai-note-pending { border-color: var(--brand); background: var(--brand-soft); }
+
+/* استيراد الأسئلة من Excel */
+.import-card h3 { display: flex; align-items: center; gap: 8px; }
+.upload-form input[type="file"] { padding: 10px; height: auto; }
+.problem-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.problem-list li { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.import-problems h2 { display: flex; align-items: center; gap: 8px; }
+.import-actions { margin-top: 16px; }
