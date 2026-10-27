@@ -25,6 +25,33 @@ function findDatabase(dbName = name) {
   return list.find((db) => db.name === dbName);
 }
 
+/** يقسم ملف SQL إلى جمل عند كل «;» خارج النصوص بين علامات التنصيص. */
+function splitSql(text) {
+  const out = [];
+  let cur = "";
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      cur += c;
+      if (c === quote) {
+        if (text[i + 1] === quote) cur += text[++i];
+        else quote = null;
+      }
+    } else if (c === "'" || c === '"') {
+      quote = c;
+      cur += c;
+    } else if (c === ";") {
+      if (cur.trim()) out.push(cur.trim());
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 function tableCount(dbName) {
   const out = wrangler(["d1", "info", dbName, "--json"]);
   return Number(JSON.parse(out.slice(out.indexOf("{"))).num_tables ?? 0);
@@ -43,11 +70,11 @@ if (db && copyFrom && findDatabase(copyFrom) && tableCount(name) === 0) {
   try {
     wrangler(["d1", "export", copyFrom, "--remote", "--output", "d1-copy.sql"]);
     if (!existsSync("d1-copy.sql") || statSync("d1-copy.sql").size === 0) throw new Error("ملف النسخ فارغ");
-    // D1 لا يسمح بالكتابة في جداول SQLite الداخلية (sqlite_sequence): تُحذف من ملف النسخ
-    const dump = readFileSync("d1-copy.sql", "utf8")
-      .split("\n")
-      .filter((line) => !/sqlite_sequence|_cf_KV/i.test(line))
-      .join("\n");
+    // ترتيب ملف النسخ: كل الجداول أولًا ثم البيانات ثم الفهارس، لأن SQLite يرفض إدخال صف يشير
+    // إلى جدول لم يُنشأ بعد. وD1 لا يسمح بالكتابة في جدول SQLite الداخلي sqlite_sequence.
+    const statements = splitSql(readFileSync("d1-copy.sql", "utf8")).filter((st) => !/sqlite_sequence|_cf_KV/i.test(st));
+    const rank = (st) => (/^PRAGMA/i.test(st) ? 0 : /^CREATE TABLE/i.test(st) ? 1 : /^INSERT/i.test(st) ? 2 : 3);
+    const dump = statements.sort((a, b) => rank(a) - rank(b)).map((st) => `${st};`).join("\n");
     writeFileSync("d1-copy.sql", dump);
     wrangler(["d1", "execute", name, "--remote", "--file", "d1-copy.sql"], true);
     console.log(`::notice title=نقل قاعدة البيانات::نُسخت بيانات ${copyFrom} إلى ${name} (${LOCATION}). القاعدة القديمة باقية دون تغيير.`);
