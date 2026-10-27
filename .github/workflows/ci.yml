@@ -61,7 +61,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -o pipefail
-          node scripts/ensure-d1.mjs zinou-math-staging
+          # القاعدة في أوروبا الغربية (الأقرب إلى الجزائر)؛ أول مرة تُنسخ إليها بيانات القاعدة القديمة في أمريكا
+          node scripts/ensure-d1.mjs zinou-math-staging-eu --copy-from zinou-math-staging
           # تطبيق الجداول الجديدة فقط (ما طُبّق سابقًا لا يُعاد)
           if ! npx wrangler d1 migrations apply DB --env staging --remote 2>&1 | tee migrate.log; then
             msg=$(tail -20 migrate.log | sed -e 's/%/%25/g' -e 's/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g')
