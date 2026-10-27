@@ -11,7 +11,7 @@ import { handleAdminRoutes } from "./admin-routes.ts";
 import { handleFamilyRoutes } from "./family-routes.ts";
 import { handleQuizRoutes, quizIntro } from "./quiz-routes.ts";
 import { messagePage } from "./auth-pages.ts";
-import { SECURITY_HEADERS, field, isSameOrigin, json, page, readForm, redirect, safeNext, type Env } from "./http.ts";
+import { SECURITY_HEADERS, THEME_COOKIE, field, isSameOrigin, json, page, readCookies, readForm, redirect, safeNext, type Env } from "./http.ts";
 import { isTeacherView, type View, type Viewer } from "./ui.ts";
 import type { Student } from "./db.ts";
 
@@ -208,7 +208,9 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
     }
   }
   const preview = user?.account.role === "admin" && (user.session.preview === "subscribed" || user.session.preview === "free") ? user.session.preview : null;
-  const view: View = { env: env.APP_ENV, viewer, access, preview, path };
+  const themeCookie = readCookies(request).get(THEME_COOKIE);
+  const theme = themeCookie === "light" || themeCookie === "dark" ? themeCookie : null;
+  const view: View = { env: env.APP_ENV, viewer, access, preview, path, theme };
 
   if (method === "POST" && !isSameOrigin(request)) {
     return page(messagePage(view, "طلب مرفوض", "أُرسل هذا النموذج من خارج الموقع، فرُفض حمايةً لحسابك.", "error"), 403);
@@ -225,6 +227,13 @@ export async function handleRequest(request: Request, env: Env): Promise<Respons
   // كلمة مرور العائلة يغيّرها الولي فقط، لا من ملف أحد الأبناء
   if (user?.account.role === "parent" && viewer?.profile === "student" && path === "/account/password") {
     return redirect("/home");
+  }
+
+  // الوضع الليلي والنهاري بدون JavaScript: يقلب الوضع الحالي ويحفظه في كعكة
+  if (path === "/theme" && method === "POST") {
+    const form = await readForm(request);
+    const next = theme === "dark" ? "light" : "dark";
+    return redirect(safeNext(field(form, "back"), "/"), [`${THEME_COOKIE}=${next}; Path=/; Secure; SameSite=Lax; Max-Age=31536000`]);
   }
 
   if (path === "/preview" && method === "POST") {

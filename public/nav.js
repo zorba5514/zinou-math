@@ -44,3 +44,16 @@ document.addEventListener("submit", (event) => {
 
 // العودة بزر الرجوع تُظهر الصفحة من الذاكرة: نزيل حالة التحميل
 addEventListener("pageshow", stop);
+
+// الوضع الليلي والنهاري: يتبدل فورًا ويُحفظ في كعكة يقرؤها الخادم في الصفحات التالية (فلا وميض)
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-theme-toggle]");
+  if (!button) return;
+  event.preventDefault();
+  const root = document.documentElement;
+  const current = root.dataset.theme ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = current === "dark" ? "light" : "dark";
+  root.dataset.theme = next;
+  document.cookie = `zd_theme=${next}; Path=/; Secure; SameSite=Lax; Max-Age=31536000`;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", "#16181D");
+}, true);

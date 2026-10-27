@@ -64,6 +64,8 @@ export function redirect(location: string, cookies: string[] = [], status = 303)
 
 export const SESSION_COOKIE = "__Host-zd_session";
 export const DEVICE_COOKIE = "__Host-zd_device";
+/** الوضع الليلي أو النهاري. ليست سرية، ويكتبها كود الصفحة أيضًا. */
+export const THEME_COOKIE = "zd_theme";
 
 export function readCookies(request: Request): Map<string, string> {
   const out = new Map<string, string>();

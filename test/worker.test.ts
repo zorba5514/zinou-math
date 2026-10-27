@@ -177,3 +177,27 @@ test("فحص الصحة يكشف قاعدة بيانات بلا جداول", asy
   assert.equal(res.status, 503);
   assert.equal((await res.json()).database, "error");
 });
+
+test("زر الوضع الليلي: يظهر في كل صفحة، والخادم يطبّق الوضع المحفوظ دون وميض", async () => {
+  const env = fakeEnv();
+  const plain = await (await handleRequest(new Request(`${base}/`), env)).text();
+  assert.match(plain, /<html lang="ar" dir="rtl">/);
+  assert.match(plain, /data-theme-toggle/);
+
+  const dark = await (await handleRequest(new Request(`${base}/`, { headers: { Cookie: "zd_theme=dark" } }), env)).text();
+  assert.match(dark, /<html lang="ar" dir="rtl" data-theme="dark">/);
+  // قيمة غريبة في الكعكة لا تصل إلى الصفحة
+  const odd = await (await handleRequest(new Request(`${base}/`, { headers: { Cookie: 'zd_theme="><script>' } }), env)).text();
+  assert.match(odd, /<html lang="ar" dir="rtl">/);
+
+  // بدون JavaScript: النموذج يقلب الوضع ويعود إلى الصفحة نفسها، ولا يقبل عنوانًا خارجيًا
+  const toggle = (cookie: string, back: string) =>
+    handleRequest(new Request(`${base}/theme`, { method: "POST", headers: { Origin: base, Cookie: cookie, "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ back }) }), env);
+  let res = await toggle("zd_theme=dark", "/levels/1am");
+  assert.equal(res.status, 303);
+  assert.equal(res.headers.get("Location"), "/levels/1am");
+  assert.match(res.headers.get("Set-Cookie") ?? "", /^zd_theme=light;/);
+  res = await toggle("", "https://evil.example/");
+  assert.equal(res.headers.get("Location"), "/");
+  assert.match(res.headers.get("Set-Cookie") ?? "", /^zd_theme=dark;/);
+});

@@ -34,6 +34,18 @@ export interface View {
   preview?: "subscribed" | "free" | null;
   /** مسار الصفحة الحالية (للعودة إليها بعد تبديل المعاينة) */
   path?: string;
+  /** الوضع الذي اختاره المستعمل بالزر؛ null = حسب إعداد الهاتف */
+  theme?: "light" | "dark" | null;
+}
+
+/** زر القمر/الشمس. يعمل بدون JavaScript (نموذج)، ومع nav.js يتبدل فورًا دون إعادة تحميل. */
+function themeButton(view: View, withLabel = false): Raw {
+  return html`<form method="post" action="/theme" class="theme-form">
+  <input type="hidden" name="back" value="${view.path ?? "/"}">
+  <button class="theme-btn" type="submit" data-theme-toggle aria-label="تبديل الوضع الليلي والنهاري" title="الوضع الليلي والنهاري">
+    ${icon("moon", "icon i-moon")}${icon("sun", "icon i-sun")}${withLabel ? html`<span>الوضع الليلي / النهاري</span>` : ""}
+  </button>
+</form>`;
 }
 
 /** الأستاذ في عرضه العادي (يرى المسودات ورسائل المعاينة)، لا في وضع «عرض كتلميذ». */
@@ -152,7 +164,7 @@ export function layout(opts: {
   const description =
     opts.description ?? `${SITE_NAME}: ${SLOGAN}. دروس رياضيات من الأولى متوسط إلى الأولى ثانوي.`;
   return html`<!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl"${opts.view.theme ? html` data-theme="${opts.view.theme}"` : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -184,11 +196,13 @@ ${area === "public" ? previewBar(opts.view) : ""}
     </a>
     ${drawerNav(area, opts.view, opts.current)}
     ${drawerFooter(opts.view)}
+    <div class="drawer-theme">${themeButton(opts.view, true)}</div>
   </aside>
   <div class="main-col">
     <header class="topbar">
       <button class="menu-btn" type="button" popovertarget="drawer" aria-label="فتح القائمة">${icon("menu")}</button>
       <a class="topbar-brand" href="/"><img src="/brand/logo.svg" alt="" width="40" height="40"><span>${SITE_NAME}</span></a>
+      ${themeButton(opts.view)}
     </header>
     <main id="main" class="content">
 ${opts.body}
