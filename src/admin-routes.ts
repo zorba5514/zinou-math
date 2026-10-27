@@ -23,6 +23,7 @@ import {
 } from "./admin-pages.ts";
 import { notFoundPage } from "./pages.ts";
 import { handleContentRoutes } from "./content-admin-routes.ts";
+import { handleLevelWorkspace } from "./level-workspace.ts";
 import { handleSettings } from "./settings-admin.ts";
 import { handleQuizAdmin, pendingGrading } from "./quiz-admin.ts";
 import type { Ctx } from "./auth-routes.ts";
@@ -42,7 +43,7 @@ export async function handleAdminRoutes(ctx: Ctx): Promise<Response | null> {
   // غير الأستاذ لا يرى حتى وجود هذه الصفحات
   if (ctx.user.account.role !== "admin") return page(notFoundPage(ctx.view), 404);
 
-  const content = (await handleContentRoutes(ctx)) ?? (await handleSettings(ctx)) ?? (await handleQuizAdmin(ctx));
+  const content = (await handleLevelWorkspace(ctx)) ?? (await handleContentRoutes(ctx)) ?? (await handleSettings(ctx)) ?? (await handleQuizAdmin(ctx));
   if (content) return content;
 
   if (path === "/admin" && method === "GET") return dashboard(ctx);

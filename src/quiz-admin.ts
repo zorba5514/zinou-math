@@ -117,6 +117,7 @@ const DONE: Record<string, string> = {
   "q-saved": "حُفظ السؤال.",
   "q-deleted": "حُذف السؤال.",
   graded: "حُفظ التصحيح.",
+  duplicated: "أُنشئت نسخة مسودة من الاختبار بنفس الإعدادات والأسئلة. غيّر عنوانها من صفحة الدرس.",
   accepted: "أُضيفت الإجابة إلى الإجابات المقبولة، وصُحّحت بها كل المحاولات التي كتبتها.",
   "accept-full": "القائمة ممتلئة (20 إجابة). احذف إجابة من السؤال أولًا.",
   released: "نُشرت النتائج: يراها التلاميذ والأولياء الآن.",
@@ -588,7 +589,7 @@ function aiNote(q: Question, a: Answer | undefined, attempt: Attempt): Raw {
   }
   const ok = a.ai_verdict === "correct";
   return html`<div class="ai-note ${ok ? "ai-note-ok" : "ai-note-no"}">
-    <p>${icon("sparkle", "icon icon-sm")}<strong>حكم الذكاء الاصطناعي: ${ok ? "صحيحة" : "خاطئة"}</strong>${a.ai_reason ? html` · ${a.ai_reason}` : ""}</p>
+    <div class="ai-note-text"><p>${icon("sparkle", "icon icon-sm")}<strong>حكم الذكاء الاصطناعي: ${ok ? "صحيحة" : "خاطئة"}</strong></p>${a.ai_reason ? html`<p class="small">${a.ai_reason}</p>` : ""}</div>
     ${
       a.manual_score === null && attempt.status !== "in_progress"
         ? html`<button class="btn btn-secondary btn-xs" type="submit" formaction="/admin/attempts/${String(attempt.id)}/accept/${String(q.id)}" formnovalidate>${icon("check")}أضفها إلى الإجابات المقبولة</button>`

@@ -1,7 +1,8 @@
 // مسارات إدارة المحتوى (للأستاذ فقط؛ التحقق من الصلاحية في admin-routes.ts قبل الوصول إلى هنا).
 
 import { audit, type D1Database, type D1PreparedStatement } from "./db.ts";
-import { field, page, readForm, readUpload, redirect } from "./http.ts";
+import { field, page, readForm, readUpload, redirect, safeNext } from "./http.ts";
+import { createQuiz, levelHeader, tabCounts } from "./level-workspace.ts";
 import { randomToken } from "./crypto.ts";
 import { deleteQuizzes } from "./quiz.ts";
 import { getProgram, listPrograms, programUnits, type Lesson, type Program, type Unit } from "./content.ts";
@@ -135,9 +136,9 @@ async function showProgram(
   extra: { errors?: Record<string, string>; values?: Record<string, string> } = {},
   status = 200,
 ): Promise<Response> {
-  const units = await programUnits(ctx.env.DB, program.slug, { drafts: true });
+  const [units, counts] = await Promise.all([programUnits(ctx.env.DB, program.slug, { drafts: true }), tabCounts(ctx.env.DB, program)]);
   return page(
-    programAdminPage(ctx.view, program, units, { done: ctx.url.searchParams.get("done"), hasKey: Boolean(ctx.env.YOUTUBE_API_KEY), ...extra }),
+    programAdminPage(ctx.view, program, units, { done: ctx.url.searchParams.get("done"), hasKey: Boolean(ctx.env.YOUTUBE_API_KEY), header: levelHeader(program, "units", counts), ...extra }),
     status,
   );
 }
@@ -425,6 +426,9 @@ async function deleteLesson(ctx: Ctx, lesson: Lesson): Promise<Response> {
   await ctx.env.DB.prepare("DELETE FROM lessons WHERE id = ?").bind(lesson.id).run();
   if (lesson.file_key && ctx.env.FILES) await ctx.env.FILES.delete(lesson.file_key);
   await audit(ctx.env.DB, adminId(ctx), "lesson.deleted", `lesson:${lesson.id}`, lesson.title);
+  // من تبويب الاختبارات: العودة إليه بنفس التصفية
+  const back = safeNext(field(form, "back"), "");
+  if (back) return redirect(`${back}${back.includes("?") ? "&" : "?"}done=deleted`);
   return redirect(`/admin/units/${lesson.unit_id}?done=lesson-deleted`);
 }
 
@@ -469,13 +473,7 @@ async function addQuiz(ctx: Ctx, program: Program, unit: Unit): Promise<Response
   const form = await readForm(ctx.request);
   const title = field(form, "title");
   if (!validTitle(title, 200)) return showUnit(ctx, program, unit, { errors: { quiz: "اكتب عنوان الاختبار." }, values: { quiz_title: title } }, 400);
-  const quiz = await db.prepare("INSERT INTO quizzes (created_at, updated_at) VALUES (?, ?)").bind(ctx.now, ctx.now).run();
-  const quizId = Number(quiz.meta.last_row_id);
-  const pos = await db.prepare("SELECT COALESCE(MAX(position), 0) + 1 AS n FROM lessons WHERE unit_id = ?").bind(unit.id).first<{ n: number }>();
-  await db
-    .prepare("INSERT INTO lessons (unit_id, kind, title, position, free, status, quiz_id, created_at, updated_at) VALUES (?, 'quiz', ?, ?, 0, 'draft', ?, ?, ?)")
-    .bind(unit.id, title, pos?.n ?? 1, quizId, ctx.now, ctx.now)
-    .run();
+  const quizId = await createQuiz(db, unit.id, title, ctx.now);
   await audit(db, adminId(ctx), "quiz.added", `unit:${unit.id}`, title);
   return redirect(`/admin/quizzes/${quizId}?done=quiz-added`);
 }

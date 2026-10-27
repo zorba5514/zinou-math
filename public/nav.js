@@ -57,3 +57,13 @@ document.addEventListener("click", (event) => {
   document.cookie = `zd_theme=${next}; Path=/; Secure; SameSite=Lax; Max-Age=31536000`;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", "#16181D");
 }, true);
+
+// قوائم التصفية: تُطبَّق فور الاختيار، ويُخفى زر «تصفية» الذي يحتاجه من لا يعمل عنده JavaScript
+for (const b of document.querySelectorAll(".no-js-only")) b.hidden = true;
+document.addEventListener("change", (event) => {
+  const el = event.target;
+  if (el instanceof HTMLSelectElement && el.hasAttribute("data-autosubmit")) el.form?.requestSubmit();
+});
+
+// شريط التبويبات على الهاتف: إظهار التبويب الحالي إن كان خارج الشاشة
+document.querySelector(".tabs .tab.is-active")?.scrollIntoView({ block: "nearest", inline: "nearest" });

@@ -92,7 +92,7 @@ export function programAdminPage(
   view: View,
   program: Program,
   units: UnitWithLessons[],
-  o: { done?: string | null; errors?: Record<string, string>; values?: Record<string, string>; hasKey: boolean },
+  o: { done?: string | null; errors?: Record<string, string>; values?: Record<string, string>; hasKey: boolean; header: Raw },
 ): string {
   const e = o.errors ?? {};
   const word = unitWord(program);
@@ -100,12 +100,8 @@ export function programAdminPage(
     view,
     program.title,
     "content",
-    html`<nav class="crumbs" aria-label="مسار التصفح"><a href="/admin/content">المحتوى</a><span aria-hidden="true">/</span><span aria-current="page">${program.title}</span></nav>
+    html`${o.header}
 ${alertBox(doneMessage(o.done ?? null), "success")}
-<header class="page-head page-head-row">
-  <h1>${program.title}</h1>
-  <a class="btn btn-secondary btn-sm" href="/levels/${program.slug}">${icon("eye")}معاينة في الموقع</a>
-</header>
 <section class="section" aria-labelledby="units-title">
   <h2 id="units-title">${program.kind === "level" ? "المقاطع" : "الأجزاء"}</h2>
   ${
@@ -121,7 +117,7 @@ ${alertBox(doneMessage(o.done ?? null), "success")}
       : html`<div class="card empty"><p>لا يوجد أي ${word === "المقطع" ? "مقطع" : "جزء"} بعد. أضف الأول من النموذج أدناه.</p></div>`
   }
 </section>
-<section class="card form-card section">
+<section class="card form-card section" id="add-unit">
   <h2>إضافة ${word === "المقطع" ? "مقطع" : "جزء"}</h2>
   ${alertBox(e.form)}
   <form method="post" action="/admin/content/${program.slug}/units" class="form" novalidate>
