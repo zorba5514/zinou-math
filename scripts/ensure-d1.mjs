@@ -43,12 +43,20 @@ if (db && copyFrom && findDatabase(copyFrom) && tableCount(name) === 0) {
   try {
     wrangler(["d1", "export", copyFrom, "--remote", "--output", "d1-copy.sql"]);
     if (!existsSync("d1-copy.sql") || statSync("d1-copy.sql").size === 0) throw new Error("ملف النسخ فارغ");
+    // D1 لا يسمح بالكتابة في جداول SQLite الداخلية (sqlite_sequence): تُحذف من ملف النسخ
+    const dump = readFileSync("d1-copy.sql", "utf8")
+      .split("\n")
+      .filter((line) => !/sqlite_sequence|_cf_KV/i.test(line))
+      .join("\n");
+    writeFileSync("d1-copy.sql", dump);
     wrangler(["d1", "execute", name, "--remote", "--file", "d1-copy.sql"], true);
     console.log(`::notice title=نقل قاعدة البيانات::نُسخت بيانات ${copyFrom} إلى ${name} (${LOCATION}). القاعدة القديمة باقية دون تغيير.`);
   } catch (e) {
     // نسخ ناقص: نحذف الجديدة حتى يُعاد النسخ كاملًا في النشر التالي، ولا ننشر على قاعدة ناقصة
-    const detail = `${e.stdout ?? ""}\n${e.stderr ?? ""}`.replace(/%/g, "%25").replace(/\r?\n/g, "%0A").slice(-1500);
-    console.log(`::error title=نقل قاعدة البيانات::فشل النسخ: ${String(e.message ?? e).slice(0, 200)}%0A${detail}`);
+    const clean = (t) => String(t ?? "").replace(/\x1b\[[0-9;]*m/g, "").trim().replace(/%/g, "%25").replace(/\r?\n/g, "%0A");
+    console.log(`::error title=نقل قاعدة البيانات::فشل النسخ: ${clean(e.message).slice(0, 300)}`);
+    console.log(`::error title=مخرجات wrangler::${clean(e.stdout).slice(-900) || "(فارغ)"}`);
+    console.log(`::error title=أخطاء wrangler::${clean(e.stderr).slice(-900) || "(فارغ)"}`);
     if (existsSync("d1-copy.sql")) {
       const head = readFileSync("d1-copy.sql", "utf8").split("\n").slice(0, 12).join("%0A").slice(0, 1500);
       console.log(`::notice title=بداية ملف النسخ::${head}`);
