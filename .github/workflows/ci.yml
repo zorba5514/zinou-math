@@ -107,7 +107,23 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -o pipefail
-          if ! npx wrangler deploy --env staging 2>&1 | tee deploy.log; then
+          deployed=1
+          npx wrangler deploy --env staging 2>&1 | tee deploy.log || deployed=0
+          if [ "$deployed" = 0 ] && grep -qiE '\bai\b|workers ai' deploy.log; then
+            # إن رُفض ربط الذكاء الاصطناعي (صلاحية ناقصة في مفتاح النشر): ننشر بدونه،
+            # فتنتظر الإجابات النصية غير المطابقة تصحيح الأستاذ بدل حكم الذكاء الاصطناعي.
+            echo "::warning title=الذكاء الاصطناعي::رُفض ربط Workers AI، نُشر الموقع بدونه. أضف صلاحية Workers AI إلى مفتاح النشر."
+            python3 - <<'PY'
+          import re
+          p = "wrangler.toml"
+          s = open(p, encoding="utf8").read()
+          s = re.sub(r'\[env\.staging\.ai\]\s*\nbinding = "AI"\s*\n?', "", s)
+          open(p, "w", encoding="utf8").write(s)
+          PY
+            deployed=1
+            npx wrangler deploy --env staging 2>&1 | tee deploy.log || deployed=0
+          fi
+          if [ "$deployed" = 0 ]; then
             # نعرض آخر أسطر الخطأ كتنبيه يظهر في صفحة التشغيل مباشرة.
             msg=$(tail -25 deploy.log | sed -e 's/%/%25/g' -e 's/\r//g' | sed ':a;N;$!ba;s/\n/%0A/g')
             echo "::error title=فشل النشر::$msg"

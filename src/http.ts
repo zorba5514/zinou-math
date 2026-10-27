@@ -1,5 +1,6 @@
 // أدوات الرد على الطلبات: الصفحات، والتحويل، والكعكات (cookies)، والحماية من الطلبات المزوّرة.
 
+import type { AiBinding } from "./ai-grade.ts";
 import type { D1Database, R2Bucket } from "./db.ts";
 
 export interface Env {
@@ -17,6 +18,10 @@ export interface Env {
   YOUTUBE_API_KEY?: string;
   /** مخزن ملفات PDF (R2). غير موجود حتى يُفعَّل R2 في حساب Cloudflare. */
   FILES?: R2Bucket;
+  /** Workers AI: للحكم على الإجابات القصيرة. لا يحتاج مفتاحًا، فهو ربط داخلي في Cloudflare. */
+  AI?: AiBinding;
+  /** لتغيير نموذج الذكاء الاصطناعي دون تعديل الكود (اختياري). */
+  AI_MODEL?: string;
 }
 
 /** ترويسات أمان تُضاف إلى كل رد يصدر من الخادم. */

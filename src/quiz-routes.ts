@@ -4,6 +4,7 @@
 // - الاجتياز: ملف الابن فقط، وبنفس قواعد فتح الدرس (منشور، ومجاني أو باشتراك).
 // - النتيجة: الابن صاحب المحاولة، ووليه، والأستاذ.
 
+import { aiGrader } from "./ai-grade.ts";
 import { audit } from "./db.ts";
 import { json, page, redirect } from "./http.ts";
 import { randomToken } from "./crypto.ts";
@@ -60,7 +61,7 @@ export async function quizIntro(ctx: Ctx, c: LessonContext): Promise<Response> {
 
   if (studentId !== null) {
     const rows = (await db.prepare("SELECT * FROM attempts WHERE quiz_id = ? AND student_id = ? ORDER BY started_at DESC").bind(quiz.id, studentId).all<Attempt>()).results;
-    for (const r of rows) attempts.push({ attempt: await closeIfExpired(db, quiz, r, ctx.now) });
+    for (const r of rows) attempts.push({ attempt: await closeIfExpired(db, quiz, r, ctx.now, aiGrader(ctx.env)) });
   } else if (ctx.view.viewer?.role === "parent" && ctx.view.viewer.profile === "parent" && ctx.user) {
     const rows = (
       await db
@@ -71,7 +72,7 @@ export async function quizIntro(ctx: Ctx, c: LessonContext): Promise<Response> {
         .bind(quiz.id, ctx.user.account.id)
         .all<Attempt & { student_name: string }>()
     ).results;
-    for (const r of rows) attempts.push({ attempt: await closeIfExpired(db, quiz, r, ctx.now), student: r.student_name });
+    for (const r of rows) attempts.push({ attempt: await closeIfExpired(db, quiz, r, ctx.now, aiGrader(ctx.env)), student: r.student_name });
     message = "يجتاز الاختبارَ الابنُ من ملفه. هنا تتابع نتائج أبنائك.";
   } else if (ctx.view.viewer?.role === "admin") {
     message = ctx.view.preview
@@ -142,7 +143,7 @@ async function startAttempt(ctx: Ctx, quizId: number): Promise<Response> {
   const rows = (await db.prepare("SELECT * FROM attempts WHERE quiz_id = ? AND student_id = ?").bind(quiz.id, studentId).all<Attempt>()).results;
   let used = 0;
   for (const r of rows) {
-    const a = await closeIfExpired(db, quiz, r, ctx.now);
+    const a = await closeIfExpired(db, quiz, r, ctx.now, aiGrader(ctx.env));
     // محاولة جارية: نكملها بدل فتح أخرى
     if (a.status === "in_progress") return redirect(`/attempts/${a.id}`);
     used++;
@@ -160,7 +161,7 @@ async function startAttempt(ctx: Ctx, quizId: number): Promise<Response> {
 async function showAttempt(ctx: Ctx, c: LessonContext, quiz: Quiz, attemptIn: Attempt, role: "student" | "parent" | "admin"): Promise<Response> {
   const db = ctx.env.DB;
   if (role === "admin") return redirect(`/admin/attempts/${attemptIn.id}`);
-  const attempt = await closeIfExpired(db, quiz, attemptIn, ctx.now);
+  const attempt = await closeIfExpired(db, quiz, attemptIn, ctx.now, aiGrader(ctx.env));
   const layoutData = readLayout(attempt);
   const questions = orderedQuestions(await loadQuestions(db, quiz.id), layoutData);
   const answers = new Map((await loadAnswers(db, attempt.id)).map((a) => [a.question_id, a]));
@@ -175,7 +176,7 @@ async function showAttempt(ctx: Ctx, c: LessonContext, quiz: Quiz, attemptIn: At
 /** حفظ إجابة سؤال واحد أثناء الاجتياز (يرسله المتصفح عند كل تغيير). */
 async function saveAnswer(ctx: Ctx, quiz: Quiz, attempt: Attempt): Promise<Response> {
   if (!isOpen(attempt, ctx.now)) {
-    await closeIfExpired(ctx.env.DB, quiz, attempt, ctx.now);
+    await closeIfExpired(ctx.env.DB, quiz, attempt, ctx.now, aiGrader(ctx.env));
     return json({ error: "closed" }, 409);
   }
   let form: FormData;
@@ -201,7 +202,7 @@ async function submitAttempt(ctx: Ctx, c: LessonContext, quiz: Quiz, attempt: At
   const db = ctx.env.DB;
   if (!isOpen(attempt, ctx.now)) {
     // انتهى الوقت: التسليم المتأخر مرفوض، وتُصحَّح الإجابات المحفوظة قبل الموعد
-    await closeIfExpired(db, quiz, attempt, ctx.now);
+    await closeIfExpired(db, quiz, attempt, ctx.now, aiGrader(ctx.env));
     return redirect(`/attempts/${attempt.id}`);
   }
   const length = Number(ctx.request.headers.get("Content-Length") ?? "0");
@@ -247,7 +248,7 @@ async function submitAttempt(ctx: Ctx, c: LessonContext, quiz: Quiz, attempt: At
   }
   if (statements.length) await db.batch(statements);
   const fresh = (await db.prepare("SELECT * FROM attempts WHERE id = ?").bind(attempt.id).first<Attempt>()) ?? attempt;
-  await finalizeAttempt(db, quiz, fresh, ctx.now);
+  await finalizeAttempt(db, quiz, fresh, ctx.now, aiGrader(ctx.env));
   await audit(db, ctx.user?.account.id ?? null, "attempt.submitted", `quiz:${quiz.id}`, c.lesson.title);
   return redirect(`/attempts/${attempt.id}?done=1`);
 }

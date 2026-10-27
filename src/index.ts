@@ -84,6 +84,8 @@ async function handleApi(request: Request, env: Env, path: string): Promise<Resp
         country: cf?.country ?? null,
         db_ms: dbMs,
         db_region: dbRegion,
+        files: Boolean(env.FILES),
+        ai: Boolean(env.AI),
       },
       database === "ok" ? 200 : 503,
     );

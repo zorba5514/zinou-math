@@ -710,3 +710,12 @@ select.input { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellips
 }
 .drawer-theme .theme-btn { width: 100%; height: 48px; background: transparent; color: var(--drawer-muted); border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px; box-shadow: none; display: flex; gap: 8px; justify-content: center; }
 .drawer-theme .theme-btn:hover { color: var(--drawer-ink); background: rgba(255, 255, 255, .05); }
+
+/* أحكام الذكاء الاصطناعي في صفحة التصحيح */
+.pill-ai { background: var(--brand-soft); color: var(--ink); display: inline-flex; align-items: center; gap: 4px; }
+.ai-note { margin: 10px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border-inline-start: 4px solid var(--ink-3); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.ai-note p { margin: 0; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.ai-note .icon { flex: none; align-self: center; }
+.ai-note-ok { border-color: var(--success-ink); background: var(--success-soft); }
+.ai-note-no { border-color: var(--danger-ink); background: var(--danger-soft); }
+.ai-note-pending { border-color: var(--brand); background: var(--brand-soft); }

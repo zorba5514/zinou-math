@@ -1,10 +1,11 @@
 // إدارة الاختبارات في لوحة التحكم: الإعدادات، والأسئلة، والنتائج، والتصحيح اليدوي.
 
+import { aiGrader } from "./ai-grade.ts";
 import { html, type Raw } from "./html.ts";
 import { icon } from "./icons.ts";
 import { alertBox, input, select, textarea, type View } from "./ui.ts";
 import { adminLayout, when } from "./admin-pages.ts";
-import { audit } from "./db.ts";
+import { audit, type D1PreparedStatement } from "./db.ts";
 import { field, page, readForm, redirect } from "./http.ts";
 import { notFoundPage } from "./pages.ts";
 import { answerMath, mathText } from "./math.ts";
@@ -15,15 +16,18 @@ import {
   RESULTS_MODES,
   closeIfExpired,
   formatPoints,
+  isCorrect,
   loadAnswers,
   loadQuestions,
   loadQuiz,
   on20,
+  normalizeText,
   orderedQuestions,
   questionData,
   readLayout,
   readQuestionForm,
   recomputeScore,
+  usesAi,
   type Answer,
   type Attempt,
   type Question,
@@ -84,11 +88,12 @@ export async function handleQuizAdmin(ctx: Ctx): Promise<Response | null> {
     if (action === "delete" && method === "POST") return deleteQuestion(ctx, question);
     return page(notFoundPage(ctx.view), 404);
   }
-  const aMatch = /^\/admin\/attempts\/(\d{1,12})$/.exec(path);
+  const aMatch = /^\/admin\/attempts\/(\d{1,12})(?:\/accept\/(\d{1,12}))?$/.exec(path);
   if (aMatch) {
     const attempt = await ctx.env.DB.prepare("SELECT * FROM attempts WHERE id = ?").bind(Number(aMatch[1])).first<Attempt>();
     const c = attempt ? await loadContext(ctx, attempt.quiz_id) : null;
     if (!attempt || !c) return page(notFoundPage(ctx.view), 404);
+    if (aMatch[2]) return method === "POST" ? acceptAnswer(ctx, c, attempt, Number(aMatch[2])) : page(notFoundPage(ctx.view), 404);
     return method === "POST" ? saveGrades(ctx, c, attempt) : showAttempt(ctx, c, attempt);
   }
   return null;
@@ -103,6 +108,8 @@ const DONE: Record<string, string> = {
   "q-saved": "حُفظ السؤال.",
   "q-deleted": "حُذف السؤال.",
   graded: "حُفظ التصحيح.",
+  accepted: "أُضيفت الإجابة إلى الإجابات المقبولة، وصُحّحت بها كل المحاولات التي كتبتها.",
+  "accept-full": "القائمة ممتلئة (20 إجابة). احذف إجابة من السؤال أولًا.",
   released: "نُشرت النتائج: يراها التلاميذ والأولياء الآن.",
   hidden: "أُخفيت النتائج.",
 };
@@ -292,7 +299,8 @@ function questionForm(
 </div>`;
   } else if (type === "short") {
     fields = html`${select({ name: "mode", label: "نوع الإجابة", options: [{ value: "text", label: "نص (كلمة أو جملة قصيرة)" }, { value: "math", label: "عبارة رياضية (تُقبل كل كتابة مساوية)" }], value: v.mode ?? "text" })}
-${textarea({ name: "accepted", label: "الإجابات المقبولة: واحدة في كل سطر", value: v.accepted, rows: 3, dir: "auto", error: e.accepted, hint: "النص: الحروف الكبيرة والحركات والهمزات لا تهم. العبارة: 2x+3 تقبل 3+2x و(4x+6)/2." })}`;
+${textarea({ name: "accepted", label: "الإجابات المقبولة: واحدة في كل سطر", value: v.accepted, rows: 4, dir: "auto", error: e.accepted, hint: "اكتب كل الصيغ التي يمكن أن يكتبها التلميذ. النص: الحروف الكبيرة والحركات والهمزات لا تهم. العبارة: 2x+3 تقبل 3+2x و(4x+6)/2." })}
+<label class="check"><input type="checkbox" name="ai" value="1"${v.ai !== "0" ? html` checked` : ""}> للإجابة النصية: إن لم تطابق إجابة التلميذ القائمة، يحكم عليها الذكاء الاصطناعي فورًا، وتظهر لك للمراجعة</label>`;
   } else {
     fields = html`<p class="muted">يكتب التلميذ إجابته نصًا، وتصححها أنت من صفحة النتائج.</p>`;
   }
@@ -356,6 +364,7 @@ function valuesOf(q: Question): Record<string, string> {
   if (q.type === "short") {
     v.mode = d.mode ?? "text";
     v.accepted = (d.accepted ?? []).join("\n");
+    v.ai = d.ai === false ? "0" : "1";
   }
   return v;
 }
@@ -384,6 +393,7 @@ async function saveQuestion(ctx: Ctx, c: QuizContext, existing: Question | null)
   if (Object.keys(errors).length) {
     const values: Record<string, string> = {};
     for (const [k, val] of form) values[k] = val;
+    if (!form.has("ai")) values.ai = "0";
     const action = existing ? `/admin/questions/${existing.id}` : `/admin/quizzes/${c.quiz.id}/new`;
     return page(questionForm(ctx, c, type, values, errors, action, existing ? "تعديل السؤال" : "سؤال جديد"), 400);
   }
@@ -457,7 +467,7 @@ async function showResults(ctx: Ctx, c: QuizContext): Promise<Response> {
   ).results;
   // المحاولات التي انتهى وقتها تُغلق قبل العرض
   for (const r of rows) {
-    if (r.status === "in_progress") Object.assign(r, await closeIfExpired(db, c.quiz, r, ctx.now));
+    if (r.status === "in_progress") Object.assign(r, await closeIfExpired(db, c.quiz, r, ctx.now, aiGrader(ctx.env)));
   }
   const done = ctx.url.searchParams.get("done");
   const graded = rows.filter((r) => r.status !== "in_progress");
@@ -482,7 +492,7 @@ ${
     ? html`<ol class="card admin-list">${rows.map(
         (r) => html`<li>
       <a class="admin-list-main" href="/admin/attempts/${String(r.id)}"><strong>${r.student}</strong><small>${r.parent} · ${when(r.started_at)}${r.upload_key ? " · ملف مرفوع" : ""}</small></a>
-      ${statusPill(r)}
+      ${r.ai_review ? html`<span class="pill pill-ai">${icon("sparkle", "icon icon-sm")}للمراجعة</span>` : ""}${statusPill(r)}
       <span class="score-chip">${r.status === "in_progress" ? "…" : html`<bdi dir="ltr">${on20(r.score, r.max_score)}/20</bdi>`}</span>
     </li>`,
       )}</ol>`
@@ -501,7 +511,7 @@ async function toggleRelease(ctx: Ctx, c: QuizContext): Promise<Response> {
 
 async function showAttempt(ctx: Ctx, c: QuizContext, attemptIn: Attempt, errors: Record<string, string> = {}, status = 200): Promise<Response> {
   const db = ctx.env.DB;
-  const attempt = await closeIfExpired(db, c.quiz, attemptIn, ctx.now);
+  const attempt = await closeIfExpired(db, c.quiz, attemptIn, ctx.now, aiGrader(ctx.env));
   const student = await db
     .prepare("SELECT s.name, a.name AS parent, a.id AS account_id FROM students s JOIN accounts a ON a.id = s.account_id WHERE s.id = ?")
     .bind(attempt.student_id)
@@ -537,6 +547,7 @@ ${
       <div class="q-head"><span class="unit-num">${i + 1}</span><span class="pill pill-muted">${QUESTION_TYPES[q.type]}</span></div>
       ${questionPreview(q)}
       <div class="q-given"><span class="muted">إجابة التلميذ:</span> ${answerView(q, a?.value ?? "")}</div>
+      ${aiNote(q, a, attempt)}
       ${gradeField(q, a, errors, open)}
     </li>`;
   })}</ol>
@@ -555,6 +566,26 @@ ${
   );
 }
 
+/** حكم الذكاء الاصطناعي على إجابة، مع زر لإضافتها إلى الإجابات المقبولة. */
+function aiNote(q: Question, a: Answer | undefined, attempt: Attempt): Raw {
+  if (!a?.ai_verdict) {
+    // تعذّر الحكم: الإجابة تنتظر علامتك
+    if (usesAi(q) && attempt.status !== "in_progress" && a?.value.trim() && a.auto_score === null && a.manual_score === null) {
+      return html`<p class="ai-note ai-note-pending">${icon("sparkle", "icon icon-sm")}لم يتمكن الذكاء الاصطناعي من الحكم على هذه الإجابة. ضع علامتها بنفسك.</p>`;
+    }
+    return html``;
+  }
+  const ok = a.ai_verdict === "correct";
+  return html`<div class="ai-note ${ok ? "ai-note-ok" : "ai-note-no"}">
+    <p>${icon("sparkle", "icon icon-sm")}<strong>حكم الذكاء الاصطناعي: ${ok ? "صحيحة" : "خاطئة"}</strong>${a.ai_reason ? html` · ${a.ai_reason}` : ""}</p>
+    ${
+      a.manual_score === null && attempt.status !== "in_progress"
+        ? html`<button class="btn btn-secondary btn-xs" type="submit" formaction="/admin/attempts/${String(attempt.id)}/accept/${String(q.id)}" formnovalidate>${icon("check")}أضفها إلى الإجابات المقبولة</button>`
+        : ""
+    }
+  </div>`;
+}
+
 function gradeField(q: Question, a: Answer | undefined, errors: Record<string, string>, open: boolean): Raw {
   if (open) return html``;
   const auto = a?.auto_score ?? null;
@@ -568,7 +599,7 @@ function gradeField(q: Question, a: Answer | undefined, errors: Record<string, s
 
 async function saveGrades(ctx: Ctx, c: QuizContext, attemptIn: Attempt): Promise<Response> {
   const db = ctx.env.DB;
-  const attempt = await closeIfExpired(db, c.quiz, attemptIn, ctx.now);
+  const attempt = await closeIfExpired(db, c.quiz, attemptIn, ctx.now, aiGrader(ctx.env));
   if (attempt.status === "in_progress") return showAttempt(ctx, c, attempt, {}, 409);
   const form = await readForm(ctx.request);
   const questions = orderedQuestions(await loadQuestions(db, c.quiz.id), readLayout(attempt));
@@ -604,7 +635,7 @@ async function saveGrades(ctx: Ctx, c: QuizContext, attemptIn: Attempt): Promise
   if (Object.keys(errors).length) return showAttempt(ctx, c, attempt, errors, 400);
   updates.push(
     db
-      .prepare("UPDATE attempts SET status = 'graded', graded_at = ?, feedback = ? WHERE id = ?")
+      .prepare("UPDATE attempts SET status = 'graded', graded_at = ?, feedback = ?, ai_review = 0 WHERE id = ?")
       .bind(ctx.now, field(form, "feedback").slice(0, 1000) || null, attempt.id),
   );
   await db.batch(updates);
@@ -613,15 +644,55 @@ async function saveGrades(ctx: Ctx, c: QuizContext, attemptIn: Attempt): Promise
   return redirect(`/admin/attempts/${attempt.id}?done=graded`);
 }
 
-/** للوحة التحكم: المحاولات التي تنتظر التصحيح. */
+/**
+ * «أضفها إلى الإجابات المقبولة»: إجابة التلميذ تصبح مقبولة في السؤال، وتُصحَّح بها كل المحاولات
+ * التي كتبت نفس الإجابة (ما لم يضع الأستاذ علامة بيده). الإجابة تؤخذ من قاعدة البيانات، لا من النموذج.
+ */
+async function acceptAnswer(ctx: Ctx, c: QuizContext, attempt: Attempt, questionId: number): Promise<Response> {
+  const db = ctx.env.DB;
+  const [qRes, aRes] = await db.batch([
+    db.prepare("SELECT * FROM questions WHERE id = ? AND quiz_id = ?").bind(questionId, c.quiz.id),
+    db.prepare("SELECT * FROM answers WHERE attempt_id = ? AND question_id = ?").bind(attempt.id, questionId),
+  ]);
+  const q = qRes?.results[0] as unknown as Question | undefined;
+  const a = aRes?.results[0] as unknown as Answer | undefined;
+  const value = a?.value.trim().slice(0, 200) ?? "";
+  if (!q || q.type !== "short" || !value) return page(notFoundPage(ctx.view), 404);
+  const d = questionData(q);
+  const accepted = d.accepted ?? [];
+  if (!accepted.some((x) => normalizeText(x) === normalizeText(value))) {
+    if (accepted.length >= 20) return redirect(`/admin/attempts/${attempt.id}?done=accept-full`);
+    accepted.push(value);
+  }
+  const updatedQ = { ...q, data: JSON.stringify({ ...d, accepted }) };
+  const others = (
+    await db
+      .prepare("SELECT n.attempt_id, n.value FROM answers n JOIN attempts t ON t.id = n.attempt_id WHERE n.question_id = ? AND t.status != 'in_progress' AND n.manual_score IS NULL")
+      .bind(q.id)
+      .all<{ attempt_id: number; value: string }>()
+  ).results.filter((r) => isCorrect(updatedQ, r.value));
+  const statements: D1PreparedStatement[] = [db.prepare("UPDATE questions SET data = ?, updated_at = ? WHERE id = ?").bind(updatedQ.data, ctx.now, q.id)];
+  for (const r of others) statements.push(db.prepare("UPDATE answers SET auto_score = ? WHERE attempt_id = ? AND question_id = ?").bind(q.points, r.attempt_id, q.id));
+  // إعادة حساب علامة كل محاولة تأثرت
+  for (const id of new Set(others.map((r) => r.attempt_id))) {
+    statements.push(
+      db.prepare("UPDATE attempts SET score = (SELECT COALESCE(SUM(COALESCE(manual_score, auto_score, 0)), 0) FROM answers WHERE attempt_id = ?) WHERE id = ?").bind(id, id),
+    );
+  }
+  await db.batch(statements);
+  await audit(db, adminId(ctx), "question.answer_accepted", `quiz:${c.quiz.id}`, `${c.lesson.title}: ${value}`);
+  return redirect(`/admin/attempts/${attempt.id}?done=accepted`);
+}
+
+/** للوحة التحكم: المحاولات التي تنتظر التصحيح، أو فيها أحكام للذكاء الاصطناعي لم تُراجع. */
 export async function pendingGrading(ctx: Ctx) {
   const r = await ctx.env.DB
     .prepare(
-      `SELECT t.id, t.submitted_at, s.name AS student, l.title AS quiz FROM attempts t
+      `SELECT t.id, t.submitted_at, t.status, t.ai_review, s.name AS student, l.title AS quiz FROM attempts t
        JOIN students s ON s.id = t.student_id JOIN lessons l ON l.quiz_id = t.quiz_id
-       WHERE t.status = 'submitted' ORDER BY t.submitted_at LIMIT 50`,
+       WHERE t.status = 'submitted' OR t.ai_review = 1 ORDER BY t.submitted_at LIMIT 50`,
     )
-    .all<{ id: number; submitted_at: number; student: string; quiz: string }>();
+    .all<{ id: number; submitted_at: number; status: string; ai_review: number; student: string; quiz: string }>();
   return r.results;
 }
 

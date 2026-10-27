@@ -471,3 +471,134 @@ test("النتائج تظهر في صفحة التلميذ وصفحة الولي
   assert.match(account, /نتائج الاختبارات/);
   assert.match(account, /ياسين بن علي · فرض المقطع 1/);
 });
+
+// ---------- الذكاء الاصطناعي للإجابات القصيرة ----------
+
+const TEXT_Q: typeof ALL_QUESTIONS = [
+  ["short", { text: "ما اسم الرباعي الذي فيه كل ضلعين متقابلين متوازيين؟", mode: "text", accepted: "متوازي الأضلاع", ai: "1", points: "2" }, ""],
+  ["short", { text: "ما اسم المستقيم العمودي على قطعة في منتصفها؟", mode: "text", accepted: "محور القطعة", points: "2" }, ""],
+];
+
+/** ذكاء اصطناعي وهمي: يحكم حسب الإجابة، ويسجّل ما وصله. */
+function fakeAi(decide: (answer: string) => unknown) {
+  const calls: string[] = [];
+  return {
+    calls,
+    async run(_model: string, input: unknown) {
+      const content = (input as { messages: { content: string }[] }).messages[1]!.content;
+      const answer = /<student_answer>([\s\S]*)<\/student_answer>/.exec(content)?.[1] ?? "";
+      calls.push(answer);
+      return decide(answer);
+    },
+  };
+}
+
+test("قراءة حكم الذكاء الاصطناعي: JSON داخل نص، أو كائن جاهز، والرد غير المفهوم يُرفض", async () => {
+  const { parseJudgement } = await import("../src/ai-grade.ts");
+  assert.deepEqual(parseJudgement({ response: 'الحكم: {"correct": true, "reason": "نفس المعنى"}' }), { verdict: "correct", reason: "نفس المعنى" });
+  assert.deepEqual(parseJudgement({ response: { correct: false, reason: "مختلف" } }), { verdict: "wrong", reason: "مختلف" });
+  assert.equal(parseJudgement({ response: "لا أعرف" }), null);
+  assert.equal(parseJudgement({ response: '{"correct": "ربما"}' }), null);
+  assert.equal(parseJudgement(null), null);
+});
+
+test("خانة الذكاء الاصطناعي في السؤال النصي: مفعّلة افتراضيًا وتُطفأ، ولا تخص العبارة الرياضية", () => {
+  const on = readQuestionForm("short", new Map([["text", "س"], ["mode", "text"], ["accepted", "أ"], ["ai", "1"]]));
+  assert.equal(on.input.data.ai, true);
+  const off = readQuestionForm("short", new Map([["text", "س"], ["mode", "text"], ["accepted", "أ"]]));
+  assert.equal(off.input.data.ai, false);
+  const math = readQuestionForm("short", new Map([["text", "س"], ["mode", "math"], ["accepted", "2x"], ["ai", "1"]]));
+  assert.equal(math.input.data.ai, undefined);
+});
+
+test("الذكاء الاصطناعي يحكم فورًا على الإجابة غير الموجودة في القائمة، وتظهر للأستاذ للمراجعة", async () => {
+  const s = await setup({ questions: TEXT_Q.slice(0, 1) });
+  const ai = fakeAi((a) => ({ response: a.includes("متوازى") ? '{"correct": true, "reason": "خطأ إملائي بسيط"}' : '{"correct": false, "reason": "شكل آخر"}' }));
+  s.env.AI = ai;
+  await asStudent(s);
+  // إجابة تطابق القائمة: لا يُسأل الذكاء الاصطناعي
+  let id = await start(s);
+  await s.parent.post(`/attempts/${id}/submit`, { [`q_${s.questionIds[0]}`]: "متوازي الاضلاع" });
+  assert.equal(ai.calls.length, 0);
+  assert.equal(attemptRow(s, id).score, 2);
+  assert.equal(attemptRow(s, id).ai_review, 0);
+
+  // إجابة بصياغة أخرى: يحكم فورًا، والمحاولة مصححة لكن معلَّمة للمراجعة
+  await s.admin.post(`/admin/quizzes/${s.quizId}/settings`, { results: "immediate", max_attempts: "" });
+  id = await start(s);
+  await s.parent.post(`/attempts/${id}/submit`, { [`q_${s.questionIds[0]}`]: "متوازى الاضلاع ABCD" });
+  assert.deepEqual(ai.calls, ["متوازى الاضلاع ABCD"]);
+  let row = attemptRow(s, id);
+  assert.equal(row.status, "graded");
+  assert.equal(row.score, 2);
+  assert.equal(row.ai_review, 1);
+  assert.match(await (await s.parent.get(`/attempts/${id}`)).text(), /صحيح/);
+
+  const dash = await (await s.admin.get("/admin")).text();
+  assert.match(dash, /راجع حكم الذكاء الاصطناعي/);
+  const page = await (await s.admin.get(`/admin/attempts/${id}`)).text();
+  assert.match(page, /حكم الذكاء الاصطناعي: صحيحة/);
+  assert.match(page, /خطأ إملائي بسيط/);
+  assert.match(page, /أضفها إلى الإجابات المقبولة/);
+  assert.match(await (await s.admin.get(`/admin/quizzes/${s.quizId}/results`)).text(), /للمراجعة/);
+
+  // الأستاذ يراجع ويصحح بعلامته: تغلب، وتزول علامة المراجعة
+  await s.admin.post(`/admin/attempts/${id}`, { [`score_${s.questionIds[0]}`]: "1" });
+  row = attemptRow(s, id);
+  assert.equal(row.score, 1);
+  assert.equal(row.ai_review, 0);
+  assert.doesNotMatch(await (await s.admin.get("/admin")).text(), /راجع حكم الذكاء الاصطناعي/);
+});
+
+test("إضافة إجابة التلميذ إلى المقبولة تصحح بها كل المحاولات التي كتبتها", async () => {
+  const s = await setup({ questions: TEXT_Q.slice(0, 1), settings: { max_attempts: "" } });
+  s.env.AI = fakeAi(() => ({ response: '{"correct": false, "reason": "ليست في القائمة"}' }));
+  const ids: number[] = [];
+  for (const kid of [s.yacine, s.maryam]) {
+    await asStudent(s, kid);
+    const id = await start(s);
+    await s.parent.post(`/attempts/${id}/submit`, { [`q_${s.questionIds[0]}`]: "Parallélogramme" });
+    ids.push(id);
+    assert.equal(attemptRow(s, id).score, 0);
+  }
+  const r = await s.admin.post(`/admin/attempts/${ids[0]}/accept/${s.questionIds[0]}`, {});
+  assert.equal(r.headers.get("Location"), `/admin/attempts/${ids[0]}?done=accepted`);
+  for (const id of ids) assert.equal(attemptRow(s, id).score, 2);
+  const data = JSON.parse(String(s.env.DB.raw.prepare("SELECT data FROM questions WHERE id = ?").get(s.questionIds[0])?.data));
+  assert.deepEqual(data.accepted, ["متوازي الأضلاع", "Parallélogramme"]);
+  // التلميذ والولي لا يصلون إلى هذا المسار
+  const parentTry = await s.parent.post(`/admin/attempts/${ids[0]}/accept/${s.questionIds[0]}`, {});
+  assert.notEqual(parentTry.headers.get("Location"), `/admin/attempts/${ids[0]}?done=accepted`);
+});
+
+test("تعذّر الذكاء الاصطناعي (خطأ أو تأخر أو غير مربوط): لا تخمين، الإجابة تنتظر الأستاذ", async () => {
+  for (const ai of [
+    { async run(): Promise<unknown> { throw new Error("quota"); } },
+    { async run(): Promise<unknown> { return { response: "لا أدري" }; } },
+    undefined,
+  ]) {
+    const s = await setup({ questions: TEXT_Q });
+    s.env.AI = ai;
+    await asStudent(s);
+    const id = await start(s);
+    await s.parent.post(`/attempts/${id}/submit`, { [`q_${s.questionIds[0]}`]: "مستطيل", [`q_${s.questionIds[1]}`]: "محور القطعة" });
+    const row = attemptRow(s, id);
+    assert.equal(row.status, "submitted");
+    assert.equal(row.score, 2);
+    assert.equal(row.ai_review, 0);
+    const page = await (await s.admin.get(`/admin/attempts/${id}`)).text();
+    assert.match(page, /لم يتمكن الذكاء الاصطناعي من الحكم/);
+  }
+});
+
+test("السؤال الذي أُطفئ فيه الذكاء الاصطناعي: الإجابة غير الموجودة في القائمة خاطئة مباشرة", async () => {
+  const s = await setup({ questions: [["short", { text: "ما اسم هذا المستقيم؟", mode: "text", accepted: "محور القطعة", points: "2" }, ""]] });
+  const ai = fakeAi(() => ({ response: '{"correct": true}' }));
+  s.env.AI = ai;
+  await asStudent(s);
+  const id = await start(s);
+  await s.parent.post(`/attempts/${id}/submit`, { [`q_${s.questionIds[0]}`]: "المحور" });
+  assert.equal(ai.calls.length, 0);
+  assert.equal(attemptRow(s, id).status, "graded");
+  assert.equal(attemptRow(s, id).score, 0);
+});

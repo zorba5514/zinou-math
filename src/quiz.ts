@@ -8,6 +8,7 @@
 
 import type { D1Database, D1PreparedStatement, R2Bucket } from "./db.ts";
 import { equivalent, numericValue, parse } from "../public/mathexpr.js";
+import { MAX_AI_PER_ATTEMPT, judgeShortAnswer, type AiGrader, type AiJudgement } from "./ai-grade.ts";
 
 export type QuestionType = "single" | "multiple" | "truefalse" | "numeric" | "short" | "open";
 export type ResultsMode = "immediate" | "score" | "released";
@@ -64,6 +65,8 @@ export interface QuestionData {
   /** الإجابة القصيرة: نص أو عبارة رياضية */
   mode?: "text" | "math";
   accepted?: string[];
+  /** الإجابة النصية: هل يُسأل الذكاء الاصطناعي عن الإجابات غير الموجودة في القائمة (مفعّل ما لم يُطفأ) */
+  ai?: boolean;
 }
 
 export interface Question {
@@ -94,6 +97,8 @@ export interface Attempt {
   upload_size: number | null;
   feedback: string | null;
   graded_at: number | null;
+  /** 1 = فيها أحكام للذكاء الاصطناعي لم يراجعها الأستاذ */
+  ai_review?: number;
 }
 
 export interface Answer {
@@ -104,6 +109,8 @@ export interface Answer {
   manual_score: number | null;
   feedback: string | null;
   updated_at: number;
+  ai_verdict?: "correct" | "wrong" | null;
+  ai_reason?: string | null;
 }
 
 export function questionData(q: Pick<Question, "data">): QuestionData {
@@ -174,6 +181,7 @@ export function readQuestionForm(type: QuestionType, form: Map<string, string>):
     }
     data.mode = mode;
     data.accepted = accepted;
+    if (mode === "text") data.ai = form.get("ai") === "1";
   }
   return { input: { type, text, points: Math.round(points * 100) / 100, data }, errors };
 }
@@ -233,6 +241,13 @@ export function isCorrect(q: Pick<Question, "type" | "data">, value: string): bo
     default:
       return null;
   }
+}
+
+/** هل يُسأل الذكاء الاصطناعي عن إجابات هذا السؤال التي لم تطابق القائمة؟ */
+export function usesAi(q: Pick<Question, "type" | "data">): boolean {
+  if (q.type !== "short") return false;
+  const d = questionData(q);
+  return d.mode !== "math" && d.ai !== false;
 }
 
 export function needsManualGrading(quiz: Pick<Quiz, "allow_upload">, questions: Pick<Question, "type">[]): boolean {
@@ -305,40 +320,65 @@ export function isOpen(attempt: Pick<Attempt, "status" | "deadline_at">, now: nu
  * يغلق المحاولة ويصححها آليًا: كل سؤال تلقائي يأخذ علامته، والمفتوح ينتظر الأستاذ.
  * submittedAt: وقت التسليم، أو موعد الانتهاء إن أُغلقت لانتهاء الوقت.
  */
-export async function finalizeAttempt(db: D1Database, quiz: Quiz, attempt: Attempt, submittedAt: number): Promise<void> {
+export async function finalizeAttempt(db: D1Database, quiz: Quiz, attempt: Attempt, submittedAt: number, grader?: AiGrader): Promise<void> {
   const questions = orderedQuestions(await loadQuestions(db, quiz.id), readLayout(attempt));
   const answers = new Map((await loadAnswers(db, attempt.id)).map((a) => [a.question_id, a]));
+
+  // الإجابات النصية التي لم تطابق قائمة الأستاذ: يُطلب فيها حكم الذكاء الاصطناعي (بالتوازي)
+  const toJudge = questions.filter((q) => usesAi(q) && (answers.get(q.id)?.value ?? "").trim() !== "" && isCorrect(q, answers.get(q.id)!.value) === false);
+  const judged = new Map<number, AiJudgement | null>();
+  if (toJudge.length) {
+    const results = await Promise.all(
+      toJudge.map((q, i) =>
+        grader && i < MAX_AI_PER_ATTEMPT ? judgeShortAnswer(grader, { text: q.text, accepted: questionData(q).accepted ?? [], answer: answers.get(q.id)!.value.trim() }) : Promise.resolve(null),
+      ),
+    );
+    toJudge.forEach((q, i) => judged.set(q.id, results[i] ?? null));
+  }
+
   const statements: D1PreparedStatement[] = [];
   let score = 0;
   let max = 0;
+  let pending = false;
+  let aiUsed = false;
   for (const q of questions) {
     max += q.points;
     const a = answers.get(q.id);
-    const ok = isCorrect(q, a?.value ?? "");
-    const auto = ok === null ? null : ok ? q.points : 0;
+    let auto: number | null;
+    let verdict: AiJudgement | null = null;
+    if (judged.has(q.id)) {
+      verdict = judged.get(q.id) ?? null;
+      // تعذّر الحكم: تنتظر الإجابة تصحيح الأستاذ
+      auto = verdict ? (verdict.verdict === "correct" ? q.points : 0) : null;
+      if (verdict) aiUsed = true;
+      else pending = true;
+    } else {
+      const ok = isCorrect(q, a?.value ?? "");
+      auto = ok === null ? null : ok ? q.points : 0;
+    }
     if (auto !== null) score += auto;
     statements.push(
       db
         .prepare(
-          `INSERT INTO answers (attempt_id, question_id, value, auto_score, updated_at) VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(attempt_id, question_id) DO UPDATE SET auto_score = excluded.auto_score`,
+          `INSERT INTO answers (attempt_id, question_id, value, auto_score, ai_verdict, ai_reason, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(attempt_id, question_id) DO UPDATE SET auto_score = excluded.auto_score, ai_verdict = excluded.ai_verdict, ai_reason = excluded.ai_reason`,
         )
-        .bind(attempt.id, q.id, a?.value ?? "", auto, submittedAt),
+        .bind(attempt.id, q.id, a?.value ?? "", auto, verdict?.verdict ?? null, verdict?.reason || null, submittedAt),
     );
   }
-  const manual = needsManualGrading(quiz, questions);
+  const manual = pending || needsManualGrading(quiz, questions);
   statements.push(
     db
-      .prepare("UPDATE attempts SET status = ?, submitted_at = ?, score = ?, max_score = ?, graded_at = ? WHERE id = ? AND status = 'in_progress'")
-      .bind(manual ? "submitted" : "graded", submittedAt, score, max, manual ? null : submittedAt, attempt.id),
+      .prepare("UPDATE attempts SET status = ?, submitted_at = ?, score = ?, max_score = ?, graded_at = ?, ai_review = ? WHERE id = ? AND status = 'in_progress'")
+      .bind(manual ? "submitted" : "graded", submittedAt, score, max, manual ? null : submittedAt, aiUsed ? 1 : 0, attempt.id),
   );
   await db.batch(statements);
 }
 
 /** إذا انتهى الوقت والمحاولة ما زالت مفتوحة: تُغلق بما حُفظ. يُرجع المحاولة محدَّثة. */
-export async function closeIfExpired(db: D1Database, quiz: Quiz, attempt: Attempt, now: number): Promise<Attempt> {
+export async function closeIfExpired(db: D1Database, quiz: Quiz, attempt: Attempt, now: number, grader?: AiGrader): Promise<Attempt> {
   if (attempt.status !== "in_progress" || isOpen(attempt, now)) return attempt;
-  await finalizeAttempt(db, quiz, attempt, attempt.deadline_at ?? now);
+  await finalizeAttempt(db, quiz, attempt, attempt.deadline_at ?? now, grader);
   return (await db.prepare("SELECT * FROM attempts WHERE id = ?").bind(attempt.id).first<Attempt>()) ?? attempt;
 }
 

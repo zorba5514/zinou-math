@@ -12,6 +12,10 @@ binding = "ASSETS"
 [placement]
 mode = "smart"
 
+# Workers AI: للحكم على الإجابات القصيرة. ربط داخلي بلا مفتاح؛ الحصة المجانية 10000 «نيورون» يوميًا.
+[ai]
+binding = "AI"
+
 [vars]
 APP_ENV = "production"
 PASSWORD_ITERATIONS = "100000"
@@ -28,6 +32,10 @@ placement = { mode = "smart" }
 APP_ENV = "staging"
 # تشفير أخف لأن الخطة المجانية تحدد وقت المعالجة. يرتفع إلى 100000 مع الخطة المدفوعة.
 PASSWORD_ITERATIONS = "5000"
+
+# الذكاء الاصطناعي في موقع الاختبار (نفس الحصة المجانية للحساب)
+[env.staging.ai]
+binding = "AI"
 
 [[env.staging.d1_databases]]
 binding = "DB"

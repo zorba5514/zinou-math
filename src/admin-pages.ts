@@ -123,7 +123,7 @@ export interface DashboardData {
   pending: number;
   devices: PendingDevice[];
   ending: EndingSoon[];
-  grading: { id: number; submitted_at: number; student: string; quiz: string }[];
+  grading: { id: number; submitted_at: number; status: string; ai_review: number; student: string; quiz: string }[];
   unpaid: UnpaidRow[];
   recent: { at: number; action: string; detail: string | null; name: string | null }[];
 }
@@ -212,6 +212,7 @@ ${
     (g) => html`<li>
     <span class="icon-box icon-box-sm icon-box-soft">${icon("quiz")}</span>
     <span class="device-main"><strong><a href="/admin/attempts/${String(g.id)}">${g.student}</a></strong><small>${g.quiz} · ${when(g.submitted_at)}</small></span>
+    ${g.status === "graded" && g.ai_review ? html`<span class="pill pill-ai">${icon("sparkle", "icon icon-sm")}راجع حكم الذكاء الاصطناعي</span>` : ""}
   </li>`,
   )}</ul>
 </section>`
